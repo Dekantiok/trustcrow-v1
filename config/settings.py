@@ -33,6 +33,7 @@ INSTALLED_APPS = [
     'django.contrib.messages',
     'django.contrib.staticfiles',
     'escrow',
+    'agent',
 ]
 
 MIDDLEWARE = [
@@ -142,6 +143,21 @@ DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 PAYSTACK_SECRET_KEY = os.environ.get('PAYSTACK_SECRET_KEY', 'sk_test_dummy')
 TERMII_API_KEY = os.environ.get('TERMII_API_KEY', 'dummy_key')
 TERMII_EMAIL_CONFIG_ID = os.environ.get('TERMII_EMAIL_CONFIG_ID', 'default_config')
+
+# Baseten model inference (OpenAI-compatible endpoint). The model id is
+# verified against the project account; change it via the environment.
+BASETEN_API_KEY = os.environ.get('BASETEN_API_KEY', '')
+BASETEN_BASE_URL = os.environ.get(
+    'BASETEN_BASE_URL', 'https://inference.baseten.co/v1'
+)
+BASETEN_MODEL = os.environ.get(
+    'BASETEN_MODEL', 'meta-models/muse-spark-open-1026'
+)
+
+# Bounded agent execution: max tool iterations per user message and the
+# per-request timeout for a single inference call.
+AGENT_MAX_ITERATIONS = int(os.environ.get('AGENT_MAX_ITERATIONS', '8'))
+AGENT_REQUEST_TIMEOUT = int(os.environ.get('AGENT_REQUEST_TIMEOUT', '60'))
 
 # Seconds before an outbound Paystack/Termii call is abandoned. Without this a
 # slow gateway holds the user's request open indefinitely, which matters most on
