@@ -31,6 +31,7 @@ FALLBACK_BANKS = {
     '215': 'Unity Bank',
     '035': 'Wema Bank',
     '057': 'Zenith Bank',
+    '999992': 'OPay Digital Services',
 }
 
 MOCK_BANKS = FALLBACK_BANKS
