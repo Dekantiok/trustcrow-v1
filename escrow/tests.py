@@ -44,6 +44,20 @@ def make_contract(**overrides):
     return EscrowContract.objects.create(code=code, **fields)
 
 
+def sent_codes(mock_sender):
+    """Plaintext OTPs captured from the mocked delivery function, in order.
+
+    The database now stores only hashes, so tests read the known code the
+    same way the user does: from what was "sent".
+    """
+    return [call[0][1] for call in mock_sender.call_args_list]
+
+
+def sent_code(mock_sender):
+    """Plaintext OTP from the most recent mocked delivery."""
+    return sent_codes(mock_sender)[-1]
+
+
 def verify(client, email, code=None):
     """Verify an email as OTP confirmation does (single role per device).
 
@@ -176,33 +190,49 @@ class OtpTest(TestCase):
             self.assertEqual(record.attempts_left, expected)
 
     @patch('escrow.services.send_otp_via_termii', return_value=True)
-    def test_brute_force_is_eventually_exhausted(self, _mock):
+    def test_brute_force_is_eventually_exhausted(self, mock_send):
         record = issue_otp(BUYER, 'create')
         for _ in range(6):
             consume_otp(BUYER, '000000', 'create')
         record.refresh_from_db()
         self.assertEqual(record.attempts_left, 0)
-        result = consume_otp(BUYER, record.otp_code, 'create')
+        result = consume_otp(BUYER, sent_code(mock_send), 'create')
         self.assertEqual(result.outcome, 'exhausted')
 
     @patch('escrow.services.send_otp_via_termii', return_value=True)
-    def test_correct_code_succeeds_once(self, _mock):
+    def test_correct_code_succeeds_once(self, mock_send):
         record = issue_otp(BUYER, 'create')
-        self.assertTrue(consume_otp(BUYER, record.otp_code, 'create').ok)
-        self.assertFalse(consume_otp(BUYER, record.otp_code, 'create').ok)
+        code = sent_code(mock_send)
+        self.assertTrue(consume_otp(BUYER, code, 'create').ok)
+        self.assertFalse(consume_otp(BUYER, code, 'create').ok)
 
     @patch('escrow.services.send_otp_via_termii', return_value=True)
-    def test_expired_code_is_rejected(self, _mock):
+    def test_expired_code_is_rejected(self, mock_send):
         record = issue_otp(BUYER, 'create')
         record.expires_at = now() - datetime.timedelta(minutes=1)
         record.save()
-        result = consume_otp(BUYER, record.otp_code, 'create')
+        result = consume_otp(BUYER, sent_code(mock_send), 'create')
         self.assertEqual(result.outcome, 'expired')
 
     @patch('escrow.services.send_otp_via_termii', return_value=True)
-    def test_intent_is_scoped(self, _mock):
+    def test_intent_is_scoped(self, mock_send):
         record = issue_otp(BUYER, 'create')
-        self.assertFalse(consume_otp(BUYER, record.otp_code, 'join').ok)
+        self.assertFalse(consume_otp(BUYER, sent_code(mock_send), 'join').ok)
+
+    @patch('escrow.services.send_otp_via_termii', return_value=True)
+    def test_stored_code_is_a_hash_not_the_code(self, mock_send):
+        record = issue_otp(BUYER, 'create')
+        record.refresh_from_db()
+        code = sent_code(mock_send)
+        self.assertNotEqual(record.code_hash, code)
+        self.assertTrue(record.check_code(code))
+        self.assertTrue(consume_otp(BUYER, code, 'create').ok)
+
+    @patch('escrow.services.send_otp_via_termii', return_value=True)
+    def test_stored_hash_is_not_accepted_as_a_code(self, mock_send):
+        record = issue_otp(BUYER, 'create')
+        record.refresh_from_db()
+        self.assertFalse(consume_otp(BUYER, record.code_hash, 'create').ok)
 
 
 @override_settings(
@@ -210,10 +240,11 @@ class OtpTest(TestCase):
     TERMII_EMAIL_CONFIG_ID='live_test_config',
 )
 class TermiiPayloadTest(TestCase):
-    """The emailed code must be the code stored in AuthOTP.
+    """The emailed code must be the code the backend will accept.
 
     Regression test: the payload once omitted `code`, so production emails
     never matched the stored code while DEBUG/mocked sends hid the bug.
+    The database holds only a hash; this pins the plaintext actually sent.
     """
 
     def _post(self, response_json):
@@ -253,7 +284,7 @@ class ContractCreationTest(TestCase):
         }
 
     @patch('escrow.services.send_otp_via_termii', return_value=True)
-    def test_create_then_verify(self, _mock):
+    def test_create_then_verify(self, mock_send):
         response = self.client.post(reverse('create_contract'), self.payload)
         contract = EscrowContract.objects.get()
         self.assertRedirects(
@@ -266,9 +297,9 @@ class ContractCreationTest(TestCase):
         self.assertEqual(contract.creator_email, 'buyer@test.com')
         self.assertEqual(contract.counterparty_email, 'seller@test.com')
 
-        otp = AuthOTP.objects.get(email='buyer@test.com', intent='create')
         self.client.post(
-            reverse('verify_otp', kwargs={'code': contract.code}), {'otp': otp.otp_code}
+            reverse('verify_otp', kwargs={'code': contract.code}),
+            {'otp': sent_code(mock_send)},
         )
         contract.refresh_from_db()
         self.assertEqual(contract.status, 'awaiting_counterparty')
@@ -311,14 +342,14 @@ class JoinEscrowTest(TestCase):
         self.contract = make_contract(code='JOIN1', status='awaiting_counterparty')
 
     @patch('escrow.services.send_otp_via_termii', return_value=True)
-    def test_join_and_verify(self, _mock):
+    def test_join_and_verify(self, mock_send):
         response = self.client.post(
             reverse('join_escrow_page'), {'code': 'JOIN1', 'email': 'Seller@Test.com'}
         )
         self.assertEqual(response.status_code, 302)
-        otp = AuthOTP.objects.get(email='seller@test.com', intent='join')
         self.client.post(
-            reverse('counterparty_verify_otp', kwargs={'code': 'JOIN1'}), {'otp': otp.otp_code}
+            reverse('counterparty_verify_otp', kwargs={'code': 'JOIN1'}),
+            {'otp': sent_code(mock_send)},
         )
         self.contract.refresh_from_db()
         self.assertEqual(self.contract.status, 'awaiting_funding')
@@ -349,16 +380,16 @@ class JoinEscrowTest(TestCase):
         self.assertContains(response, 'not currently accepting')
 
     @patch('escrow.services.send_otp_via_termii', return_value=True)
-    def test_same_device_cannot_verify_both_roles(self, _mock):
+    def test_same_device_cannot_verify_both_roles(self, mock_send):
         """Buyer and seller are different people: one browser holds one role."""
         creator_contract = make_contract(
             code='DUAL1', status='pending_verification',
             creator_email=BUYER, creator_role='buyer', counterparty_email=SELLER,
         )
-        creator_otp = issue_otp(BUYER, 'create')
+        issue_otp(BUYER, 'create')
         self.client.post(
             reverse('verify_otp', kwargs={'code': 'DUAL1'}),
-            {'otp': creator_otp.otp_code},
+            {'otp': sent_codes(mock_send)[0]},
         )
         creator_contract.refresh_from_db()
         self.assertEqual(creator_contract.status, 'awaiting_counterparty')
@@ -366,7 +397,7 @@ class JoinEscrowTest(TestCase):
         join_otp = issue_otp(SELLER, 'join')
         response = self.client.post(
             reverse('counterparty_verify_otp', kwargs={'code': 'DUAL1'}),
-            {'otp': join_otp.otp_code},
+            {'otp': sent_codes(mock_send)[1]},
         )
         self.assertContains(response, 'must verify on their own device')
         creator_contract.refresh_from_db()
@@ -933,12 +964,11 @@ class MyEscrowTest(TestCase):
         self.client = Client()
 
     @patch('escrow.services.send_otp_via_termii', return_value=True)
-    def test_reauth_flow_lists_escrows(self, _mock):
+    def test_reauth_flow_lists_escrows(self, mock_send):
         make_contract(code='ME1', status='in_inspection')
         self.client.post(reverse('my_escrow'), {'email': 'Buyer@Test.com'})
-        otp = AuthOTP.objects.get(email='buyer@test.com', intent='reauth')
         response = self.client.post(
-            reverse('my_escrow_verify_otp'), {'otp': otp.otp_code}
+            reverse('my_escrow_verify_otp'), {'otp': sent_code(mock_send)}
         )
         self.assertRedirects(response, reverse('my_escrow_list'))
         listing = self.client.get(reverse('my_escrow_list'))

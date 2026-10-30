@@ -74,12 +74,13 @@ def issue_otp(email, intent):
     AuthOTP.objects.filter(email=email, intent=intent, is_used=False).update(is_used=True)
 
     otp_code = generate_otp()
-    record = AuthOTP.objects.create(
+    record = AuthOTP(
         email=email,
-        otp_code=otp_code,
         intent=intent,
         expires_at=now() + OTP_TTL,
     )
+    record.set_code(otp_code)
+    record.save()
     delivered = send_otp_via_termii(email, otp_code)
     if not delivered:
         logger.warning("OTP delivery failed for %s (%s)", email, intent)
@@ -135,7 +136,7 @@ def consume_otp(email, submitted_code, intent):
     if record is None:
         return OtpResult(OtpResult.INVALID)
 
-    if record.otp_code != submitted_code:
+    if not record.check_code(submitted_code):
         record.attempts_left = max(0, record.attempts_left - 1)
         record.save(update_fields=['attempts_left'])
         outcome = OtpResult.EXHAUSTED if record.attempts_left == 0 else OtpResult.INVALID

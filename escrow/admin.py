@@ -141,8 +141,8 @@ class EscrowContractAdmin(admin.ModelAdmin):
 class AuthOTPAdmin(admin.ModelAdmin):
     list_display = ('email', 'intent', 'attempts_left', 'is_used', 'expires_at', 'created_at')
     list_filter = ('intent', 'is_used')
-    search_fields = ('email', 'otp_code')
-    readonly_fields = ('otp_code', 'created_at')
+    search_fields = ('email',)
+    readonly_fields = ('code_hash', 'created_at')
     actions = ('purge_stale',)
 
     @admin.action(description="Delete expired or already-used codes")

@@ -1,4 +1,5 @@
 
+from django.contrib.auth.hashers import check_password, make_password
 from django.db import models
 from django.utils import timezone
 
@@ -153,7 +154,9 @@ class AuthOTP(models.Model):
     MAX_ATTEMPTS = 5
 
     email = models.EmailField(db_index=True)
-    otp_code = models.CharField(max_length=6)
+    # Only a hash of the code is ever persisted. The plaintext is sent to
+    # the user once at issuance and never stored.
+    code_hash = models.CharField(max_length=128)
     intent = models.CharField(max_length=15, choices=INTENT_CHOICES)
     attempts_left = models.IntegerField(default=MAX_ATTEMPTS)
     is_used = models.BooleanField(default=False)
@@ -180,6 +183,16 @@ class AuthOTP(models.Model):
     @property
     def is_usable(self):
         return not self.is_used and not self.is_expired and self.attempts_left > 0
+
+    def set_code(self, plaintext_code):
+        """Hash a freshly generated code for storage."""
+        self.code_hash = make_password(plaintext_code)
+
+    def check_code(self, plaintext_code):
+        """Constant-time check of a submitted code against the stored hash."""
+        if not plaintext_code:
+            return False
+        return check_password(plaintext_code, self.code_hash)
 
 
 class SettlementVault(models.Model):
