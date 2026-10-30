@@ -12,7 +12,7 @@ from django.views.decorators.http import require_POST
 from .bank_verification import get_bank_name, list_banks, verify_bank_account
 from .forms import ContractCreationForm, SettlementVaultForm
 from .gateways import get_payment_gateway
-from .models import EscrowContract, TransitionError
+from .models import EscrowContract, TransitionError, WebhookEvent
 from .services import (
     calculate_service_fee,
     confirm_funding_payment,
@@ -396,19 +396,47 @@ def paystack_webhook(request):
 
     payload = get_payment_gateway().verify_incoming_webhook(request.headers, request.body)
     if not payload:
+        WebhookEvent.objects.create(
+            provider='paystack', event='unknown',
+            signature_valid=False, payload={},
+        )
         return HttpResponseBadRequest("Invalid signature")
 
     event = payload.get('event')
     data = payload.get('data', {})
     reference = data.get('reference')
+    event_id = data.get('id')
+
+    if event_id:
+        # Paystack re-sends events until acknowledged; an already-processed
+        # event id must never move money twice.
+        recorded, created = WebhookEvent.objects.get_or_create(
+            provider='paystack', event=event or 'unknown', event_id=event_id,
+            defaults={'signature_valid': True, 'payload': payload},
+        )
+        if not created and recorded.processed:
+            logger.info("Ignoring duplicate Paystack event %s (%s)", event, event_id)
+            return HttpResponse("Duplicate event", status=200)
+    else:
+        recorded = WebhookEvent.objects.create(
+            provider='paystack', event=event or 'unknown',
+            signature_valid=True, payload=payload,
+        )
+
+    def mark_processed():
+        recorded.processed = True
+        recorded.processed_at = now()
+        recorded.save(update_fields=['processed', 'processed_at'])
 
     if event != 'charge.success' or not reference:
         logger.info("Ignoring Paystack event %s for reference %s", event, reference)
+        mark_processed()
         return HttpResponse("Webhook received", status=200)
 
     contract = EscrowContract.objects.filter(gateway_reference=reference).first()
     if contract is None:
         logger.warning("Paystack charge for unknown reference %s", reference)
+        mark_processed()
         return HttpResponse("Unknown reference", status=404)
 
     if contract.status != 'awaiting_funding':
@@ -417,6 +445,7 @@ def paystack_webhook(request):
         logger.info(
             "Ignoring charge.success for %s in status %s", contract.code, contract.status
         )
+        mark_processed()
         return HttpResponse("Already processed", status=200)
 
     amount_kobo = data.get('amount')
@@ -430,11 +459,12 @@ def paystack_webhook(request):
         )
         return HttpResponse("Amount mismatch", status=400)
 
-    moved = EscrowContract.objects.filter(
-        pk=contract.pk, status='awaiting_funding'
-    ).update(status='awaiting_dispatch')
+    moved = confirm_funding_payment(
+        contract, amount_kobo if amount_kobo is not None else expected_kobo
+    )
     if moved:
         logger.info("Payment confirmed for contract %s", contract.code)
+    mark_processed()
     return HttpResponse("Webhook received", status=200)
 
 

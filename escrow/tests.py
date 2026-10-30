@@ -9,9 +9,21 @@ from django.test import Client, TestCase, override_settings
 from django.urls import reverse
 from django.utils.timezone import now
 
-from .models import AuthOTP, EscrowContract, SettlementVault, TransitionError
+from .models import (
+    AuditEvent,
+    AuthOTP,
+    EscrowContract,
+    Identity,
+    PaymentTransaction,
+    PayoutRecord,
+    SettlementVault,
+    TransitionError,
+    VerifiedContact,
+    WebhookEvent,
+)
 from .services import (
     calculate_service_fee,
+    confirm_funding_payment,
     consume_otp,
     contracts_for_email,
     issue_otp,
@@ -1117,3 +1129,155 @@ class SmokeTest(TestCase):
         for path in Path('templates').rglob('*.html'):
             with self.subTest(path=str(path)):
                 self.assertNotIn('4f8ef7', path.read_text())
+
+
+class FinancialRecordsTest(TestCase):
+    def test_funding_creates_payment_record_and_audit(self):
+        contract = make_contract(code='REC1')
+        self.assertTrue(confirm_funding_payment(contract, 1150000))
+        payment = PaymentTransaction.objects.get(
+            provider_reference=contract.gateway_reference
+        )
+        self.assertEqual(payment.status, 'success')
+        self.assertEqual(payment.amount_kobo, 1150000)
+        self.assertEqual(payment.escrow, contract)
+        self.assertTrue(
+            AuditEvent.objects.filter(
+                action='funding.confirmed', escrow=contract
+            ).exists()
+        )
+
+    def test_second_confirmation_does_not_duplicate_rows(self):
+        contract = make_contract(code='REC2')
+        self.assertTrue(confirm_funding_payment(contract, 1150000))
+        self.assertFalse(confirm_funding_payment(contract, 1150000))
+        self.assertEqual(
+            PaymentTransaction.objects.filter(
+                provider_reference=contract.gateway_reference
+            ).count(), 1,
+        )
+        self.assertEqual(
+            AuditEvent.objects.filter(
+                action='funding.confirmed', escrow=contract
+            ).count(), 1,
+        )
+
+    def test_settle_creates_payout_record_and_audit(self):
+        contract = make_contract(code='REC3', status='pending_payout')
+        SettlementVault.objects.create(
+            contract=contract, bank_name='Test Bank', bank_code='058',
+            account_number='1234567890', account_name='Test Seller',
+        )
+        with patch('escrow.services.get_payment_gateway') as mock_gateway:
+            mock_gateway.return_value.execute_seller_payout.return_value = {
+                'status': True, 'message': 'Transfer has been queued',
+                'data': {
+                    'reference': 'trustcrow-REC3-1000000',
+                    'transfer_code': 'TRF_test123',
+                    'recipient': 'RCP_test456',
+                },
+            }
+            result = settle_pending_payout(contract)
+        self.assertTrue(result.success)
+        record = PayoutRecord.objects.get(escrow=contract)
+        self.assertEqual(record.status, 'success')
+        self.assertEqual(record.transfer_reference, 'trustcrow-REC3-1000000')
+        self.assertEqual(record.provider_transfer_code, 'TRF_test123')
+        self.assertTrue(
+            AuditEvent.objects.filter(
+                action='payout.completed', escrow=contract
+            ).exists()
+        )
+
+    def test_uncertain_payout_is_recorded_not_lost(self):
+        contract = make_contract(code='REC4', status='pending_payout')
+        SettlementVault.objects.create(
+            contract=contract, bank_name='Test Bank', bank_code='058',
+            account_number='1234567890', account_name='Test Seller',
+        )
+        with patch('escrow.services.get_payment_gateway') as mock_gateway:
+            mock_gateway.return_value.execute_seller_payout.side_effect = (
+                TimeoutError('gateway timed out')
+            )
+            result = settle_pending_payout(contract)
+        self.assertFalse(result.success)
+        record = PayoutRecord.objects.get(escrow=contract)
+        self.assertEqual(record.status, 'uncertain')
+        self.assertTrue(
+            AuditEvent.objects.filter(
+                action='payout.failed', escrow=contract
+            ).exists()
+        )
+        contract.refresh_from_db()
+        self.assertEqual(contract.status, 'pending_payout')
+
+
+class WebhookDedupTest(TestCase):
+    def setUp(self):
+        self.client = Client()
+        self.contract = make_contract(code='DEDUP1', status='awaiting_funding')
+        self.url = reverse('paystack_webhook')
+
+    def post(self, mock_gateway):
+        mock_gateway.return_value.verify_incoming_webhook.return_value = {
+            'event': 'charge.success',
+            'data': {
+                'id': 987654321,
+                'reference': self.contract.gateway_reference,
+                'amount': 1150000,
+            },
+        }
+        return self.client.post(
+            self.url, data=b'{}', content_type='application/json',
+            HTTP_X_PAYSTACK_SIGNATURE='sig',
+        )
+
+    @patch('escrow.views.get_payment_gateway')
+    def test_replayed_event_id_is_ignored(self, mock_gateway):
+        first = self.post(mock_gateway)
+        self.assertEqual(first.status_code, 200)
+        second = self.post(mock_gateway)
+        self.assertEqual(second.status_code, 200)
+        self.assertEqual(second.content, b'Duplicate event')
+        self.contract.refresh_from_db()
+        self.assertEqual(self.contract.status, 'awaiting_dispatch')
+        self.assertEqual(
+            AuditEvent.objects.filter(
+                action='funding.confirmed', escrow=self.contract
+            ).count(), 1,
+        )
+
+    @patch('escrow.views.get_payment_gateway')
+    def test_rejected_signature_is_logged(self, mock_gateway):
+        mock_gateway.return_value.verify_incoming_webhook.return_value = False
+        response = self.client.post(
+            self.url, data=b'{}', content_type='application/json',
+            HTTP_X_PAYSTACK_SIGNATURE='bogus',
+        )
+        self.assertEqual(response.status_code, 400)
+        self.assertTrue(
+            WebhookEvent.objects.filter(
+                provider='paystack', signature_valid=False
+            ).exists()
+        )
+
+
+class IdentityTest(TestCase):
+    def test_identity_with_verified_contact(self):
+        identity = Identity.objects.create(email='Buyer@Test.com')
+        self.assertEqual(identity.email, 'buyer@test.com')
+        VerifiedContact.objects.create(
+            identity=identity, channel='email', value='buyer@test.com',
+        )
+        self.assertEqual(identity.contacts.count(), 1)
+
+    def test_duplicate_contact_is_rejected(self):
+        from django.db import IntegrityError
+        identity = Identity.objects.create(email='buyer@test.com')
+        VerifiedContact.objects.create(
+            identity=identity, channel='email', value='buyer@test.com',
+        )
+        with self.assertRaises(IntegrityError):
+            VerifiedContact.objects.create(
+                identity=identity, channel='email', value='buyer@test.com',
+            )

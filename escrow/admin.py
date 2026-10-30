@@ -3,7 +3,18 @@ from django.db.models import Q
 from django.utils import timezone
 
 from .gateways import get_payment_gateway
-from .models import AuthOTP, EscrowContract, SettlementVault
+from .models import (
+    AuditEvent,
+    AuthOTP,
+    EscrowContract,
+    Identity,
+    PaymentTransaction,
+    PayoutRecord,
+    RefundRecord,
+    SettlementVault,
+    VerifiedContact,
+    WebhookEvent,
+)
 from .services import confirm_funding_payment, settle_pending_payout
 
 
@@ -160,6 +171,74 @@ class SettlementVaultAdmin(admin.ModelAdmin):
     @admin.display(description='Account number')
     def masked_account(self, obj):
         return obj.masked_account_number
+
+
+@admin.register(Identity)
+class IdentityAdmin(admin.ModelAdmin):
+    list_display = ('email', 'first_verified_at', 'last_seen_at', 'created_at')
+    search_fields = ('email',)
+    readonly_fields = ('created_at',)
+
+
+@admin.register(VerifiedContact)
+class VerifiedContactAdmin(admin.ModelAdmin):
+    list_display = ('value', 'channel', 'identity', 'verified_at', 'created_at')
+    list_filter = ('channel',)
+    search_fields = ('value', 'identity__email')
+
+
+@admin.register(PaymentTransaction)
+class PaymentTransactionAdmin(admin.ModelAdmin):
+    list_display = (
+        'provider_reference', 'escrow', 'amount_kobo', 'currency',
+        'status', 'created_at',
+    )
+    list_filter = ('status', 'provider')
+    search_fields = ('provider_reference', 'escrow__code')
+    readonly_fields = ('created_at', 'updated_at')
+
+
+@admin.register(PayoutRecord)
+class PayoutRecordAdmin(admin.ModelAdmin):
+    list_display = (
+        'id', 'escrow', 'amount', 'currency', 'status',
+        'transfer_reference', 'created_at',
+    )
+    list_filter = ('status',)
+    search_fields = ('escrow__code', 'transfer_reference', 'provider_transfer_code')
+    readonly_fields = ('created_at',)
+
+
+@admin.register(RefundRecord)
+class RefundRecordAdmin(admin.ModelAdmin):
+    list_display = (
+        'id', 'escrow', 'amount_kobo', 'currency', 'status', 'created_at',
+    )
+    list_filter = ('status',)
+    search_fields = ('escrow__code', 'provider_reference')
+    readonly_fields = ('created_at', 'updated_at')
+
+
+@admin.register(WebhookEvent)
+class WebhookEventAdmin(admin.ModelAdmin):
+    list_display = (
+        'provider', 'event', 'event_id', 'signature_valid',
+        'processed', 'received_at',
+    )
+    list_filter = ('provider', 'signature_valid', 'processed')
+    search_fields = ('event', 'event_id')
+    readonly_fields = ('received_at',)
+
+
+@admin.register(AuditEvent)
+class AuditEventAdmin(admin.ModelAdmin):
+    list_display = ('action', 'actor', 'escrow', 'created_at')
+    list_filter = ('action',)
+    search_fields = ('action', 'actor', 'escrow__code')
+    readonly_fields = ('created_at',)
+
+    def has_change_permission(self, request, obj=None):
+        return False
 
 
 admin.site.site_header = 'Trustcrow Operations'

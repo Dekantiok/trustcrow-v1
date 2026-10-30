@@ -7,13 +7,35 @@ from django.db.models import Q
 from django.utils.timezone import now
 
 from .gateways import get_payment_gateway
-from .models import AuthOTP, EscrowContract, SettlementVault, TransitionError
+from .models import (
+    AuditEvent,
+    AuthOTP,
+    EscrowContract,
+    PaymentTransaction,
+    PayoutRecord,
+    SettlementVault,
+    TransitionError,
+)
 from .notifications import send_otp_via_termii
 from .utils import generate_otp, generate_secure_code, normalize_email
 
 logger = logging.getLogger(__name__)
 
 OTP_TTL = datetime.timedelta(minutes=15)
+
+
+def audit(action, actor='system', escrow=None, metadata=None):
+    """Append a consequential event to the audit trail (best-effort)."""
+    try:
+        return AuditEvent.objects.create(
+            action=action,
+            actor=actor or 'system',
+            escrow=escrow,
+            metadata=metadata or {},
+        )
+    except Exception:
+        logger.exception("Audit write failed for action %s", action)
+        return None
 
 
 def calculate_service_fee(amount):
@@ -208,6 +230,20 @@ def confirm_funding_payment(contract, amount_kobo):
     if moved:
         logger.info("Payment confirmed for contract %s", contract.code)
         contract.refresh_from_db()
+        PaymentTransaction.objects.update_or_create(
+            provider_reference=contract.gateway_reference,
+            defaults={
+                'escrow': contract,
+                'provider': 'paystack',
+                'amount_kobo': paid_kobo,
+                'currency': contract.currency,
+                'status': 'success',
+            },
+        )
+        audit('funding.confirmed', escrow=contract, metadata={
+            'amount_kobo': paid_kobo,
+            'reference': contract.gateway_reference,
+        })
     return bool(moved)
 
 
@@ -232,14 +268,47 @@ def settle_pending_payout(contract):
         logger.exception("Payout raised for contract %s", contract.code)
         result = None
 
+    def record_payout(status):
+        raw = result if isinstance(result, dict) else {}
+        nested = raw.get('data')
+        nested = nested if isinstance(nested, dict) else {}
+
+        def pick(*keys):
+            for key in keys:
+                for source in (raw, nested):
+                    value = source.get(key)
+                    if value not in (None, ''):
+                        return value
+            return None
+
+        return PayoutRecord.objects.create(
+            escrow=contract,
+            amount=amount,
+            currency=contract.currency,
+            recipient_code=pick('recipient_code', 'recipient'),
+            transfer_reference=pick('reference'),
+            provider_transfer_code=pick('transfer_code'),
+            status=status,
+            provider_response=raw if raw else {'error': 'gateway raised'},
+        )
+
     if not _transfer_succeeded(result):
         logger.error("Payout failed for contract %s: %r", contract.code, result)
         contract.refresh_from_db()
+        record = record_payout(
+            'uncertain' if result is None else 'failed'
+        )
+        audit('payout.failed', escrow=contract, metadata={
+            'payout_id': record.id,
+            'reason': 'uncertain' if result is None else 'transfer_failed',
+        })
         return PayoutResult(success=False, reason='transfer_failed', detail=result)
 
     EscrowContract.objects.filter(pk=contract.pk, status='pending_payout').update(status='completed')
     contract.refresh_from_db()
     logger.info("Payout complete for contract %s", contract.code)
+    record = record_payout('success')
+    audit('payout.completed', escrow=contract, metadata={'payout_id': record.id})
     return PayoutResult(success=True)
 
 

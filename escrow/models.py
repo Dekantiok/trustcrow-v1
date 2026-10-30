@@ -59,6 +59,7 @@ class EscrowContract(models.Model):
     title = models.CharField(max_length=255)
     description = models.TextField()
     amount = models.DecimalField(max_digits=12, decimal_places=2)
+    currency = models.CharField(max_length=3, default='NGN')
     service_fee = models.DecimalField(max_digits=10, decimal_places=2)
     fee_payer = models.CharField(max_length=10, choices=ROLE_CHOICES)
     creator_email = models.EmailField(db_index=True)
@@ -213,3 +214,187 @@ class SettlementVault(models.Model):
         if len(self.account_number) <= 4:
             return '*' * len(self.account_number)
         return '*' * (len(self.account_number) - 4) + self.account_number[-4:]
+
+
+class Identity(models.Model):
+    """A verified user identity. No passwords — proof comes from OTP
+    challenges recorded against a VerifiedContact."""
+
+    email = models.EmailField(unique=True, db_index=True)
+    first_verified_at = models.DateTimeField(null=True, blank=True)
+    last_seen_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    def __str__(self):
+        return self.email
+
+    def save(self, *args, **kwargs):
+        self.email = normalize_email(self.email)
+        super().save(*args, **kwargs)
+
+
+class VerifiedContact(models.Model):
+    """A contact address proven to belong to an Identity."""
+
+    CHANNEL_CHOICES = [
+        ('email', 'Email'),
+    ]
+
+    identity = models.ForeignKey(
+        Identity, on_delete=models.CASCADE, related_name='contacts'
+    )
+    channel = models.CharField(max_length=15, choices=CHANNEL_CHOICES, default='email')
+    value = models.CharField(max_length=255, db_index=True)
+    verified_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(
+                fields=['identity', 'channel', 'value'],
+                name='verified_contact_unique',
+            ),
+        ]
+
+    def __str__(self):
+        return f"{self.channel}:{self.value}"
+
+    def save(self, *args, **kwargs):
+        self.value = normalize_email(self.value)
+        super().save(*args, **kwargs)
+
+
+class PaymentTransaction(models.Model):
+    """One provider-side payment attempt for an escrow.
+
+    The authoritative record of money in. Exactly one row per provider
+    reference; verification outcomes update it in place.
+    """
+
+    STATUS_CHOICES = [
+        ('pending', 'Pending'),
+        ('success', 'Success'),
+        ('failed', 'Failed'),
+    ]
+
+    escrow = models.ForeignKey(
+        EscrowContract, on_delete=models.CASCADE, related_name='payments'
+    )
+    provider = models.CharField(max_length=20, default='paystack')
+    provider_reference = models.CharField(max_length=100, unique=True, db_index=True)
+    amount_kobo = models.BigIntegerField()
+    currency = models.CharField(max_length=3, default='NGN')
+    status = models.CharField(max_length=15, choices=STATUS_CHOICES, default='pending')
+    provider_payload = models.JSONField(default=dict, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    def __str__(self):
+        return f"{self.provider_reference} ({self.status})"
+
+
+class PayoutRecord(models.Model):
+    """One seller-payout attempt. A new row per attempt so retries and
+    reconciliation have a full history; the latest row is current state."""
+
+    STATUS_CHOICES = [
+        ('initiated', 'Initiated'),
+        ('success', 'Success'),
+        ('failed', 'Failed'),
+        ('uncertain', 'Uncertain'),
+    ]
+
+    escrow = models.ForeignKey(
+        EscrowContract, on_delete=models.CASCADE, related_name='payouts'
+    )
+    amount = models.DecimalField(max_digits=12, decimal_places=2)
+    currency = models.CharField(max_length=3, default='NGN')
+    recipient_code = models.CharField(max_length=100, null=True, blank=True)
+    transfer_reference = models.CharField(max_length=100, null=True, blank=True)
+    provider_transfer_code = models.CharField(max_length=100, null=True, blank=True)
+    status = models.CharField(max_length=15, choices=STATUS_CHOICES, default='initiated')
+    provider_response = models.JSONField(default=dict, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['-id']
+
+    def __str__(self):
+        return f"Payout {self.id} for {self.escrow.code} ({self.status})"
+
+
+class RefundRecord(models.Model):
+    """One buyer-refund operation. Refunds are explicit records executed
+    through the provider — a cancelled escrow is not a refund until the
+    provider confirms it."""
+
+    STATUS_CHOICES = [
+        ('requested', 'Requested'),
+        ('initiated', 'Initiated'),
+        ('success', 'Success'),
+        ('failed', 'Failed'),
+    ]
+
+    escrow = models.ForeignKey(
+        EscrowContract, on_delete=models.CASCADE, related_name='refunds'
+    )
+    payment = models.ForeignKey(
+        PaymentTransaction, on_delete=models.SET_NULL,
+        null=True, blank=True, related_name='refunds',
+    )
+    amount_kobo = models.BigIntegerField()
+    currency = models.CharField(max_length=3, default='NGN')
+    provider_reference = models.CharField(max_length=100, null=True, blank=True)
+    status = models.CharField(max_length=15, choices=STATUS_CHOICES, default='requested')
+    provider_response = models.JSONField(default=dict, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    def __str__(self):
+        return f"Refund {self.id} for {self.escrow.code} ({self.status})"
+
+
+class WebhookEvent(models.Model):
+    """Every inbound provider event, recorded before processing so replays
+    and duplicates are detectable and safely ignorable."""
+
+    provider = models.CharField(max_length=20, db_index=True)
+    event = models.CharField(max_length=100)
+    event_id = models.CharField(max_length=100, null=True, blank=True, db_index=True)
+    signature_valid = models.BooleanField(default=False)
+    processed = models.BooleanField(default=False)
+    processed_at = models.DateTimeField(null=True, blank=True)
+    payload = models.JSONField(default=dict, blank=True)
+    received_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['-id']
+        constraints = [
+            models.UniqueConstraint(
+                fields=['provider', 'event', 'event_id'],
+                name='webhook_event_unique',
+            ),
+        ]
+
+    def __str__(self):
+        return f"{self.provider}:{self.event} ({self.event_id})"
+
+
+class AuditEvent(models.Model):
+    """Append-only trail of consequential authentication, authorization,
+    and financial events. Complements (never replaces) application logs."""
+
+    created_at = models.DateTimeField(auto_now_add=True, db_index=True)
+    actor = models.CharField(max_length=255, default='system')
+    action = models.CharField(max_length=100, db_index=True)
+    escrow = models.ForeignKey(
+        EscrowContract, on_delete=models.SET_NULL,
+        null=True, blank=True, related_name='audit_events',
+    )
+    metadata = models.JSONField(default=dict, blank=True)
+
+    class Meta:
+        ordering = ['-id']
+
+    def __str__(self):
+        return f"{self.action} by {self.actor}"
