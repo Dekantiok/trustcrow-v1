@@ -1,0 +1,43 @@
+{% extends 'base.html' %}
+{% block title %}Join Escrow — Trustcrow{% endblock %}
+{% block content %}
+<div class="row justify-content-center">
+    <div class="col-12 col-md-10 col-lg-6">
+        <div class="card-custom">
+            <div class="card-body p-4 p-md-5">
+                <div class="d-flex align-items-center gap-2 mb-1">
+                    <i class="bi bi-link-45deg text-accent fs-4"></i>
+                    <span class="mono-text text-accent small fw-bold">JOIN</span>
+                </div>
+                <h2 class="fw-bold mb-2" style="letter-spacing:-0.02em;">Join Existing Escrow</h2>
+                <p class="text-muted-custom small mb-4">Enter the escrow code and the email linked to this transaction.</p>
+                <div class="divider"></div>
+
+                {% if error_message %}
+                <div class="alert alert-danger border-0 py-2 small"><i class="bi bi-exclamation-circle me-1"></i>{{ error_message }}</div>
+                {% endif %}
+
+                <form method="post">
+                    {% csrf_token %}
+                    <div class="mb-3">
+                        <label for="code" class="form-label">Escrow Code</label>
+                        <input type="text" name="code" id="code" class="form-control mono-text" placeholder="e.g., aB3xK9mP2" autocapitalize="characters" spellcheck="false" autocomplete="off" required autofocus>
+                        <small class="text-muted-custom d-block mt-1">Found in your invite email or notification from the creator.</small>
+                    </div>
+                    <div class="mb-3">
+                        <label for="email" class="form-label">Your Email Address</label>
+                        <input type="email" name="email" id="email" class="form-control" placeholder="your@email.com" autocapitalize="none" spellcheck="false" autocomplete="email" required>
+                    </div>
+                    <button type="submit" class="btn btn-primary-custom btn-lg w-100 mt-3">
+                        <i class="bi bi-arrow-right-circle me-2"></i>Verify & Continue
+                    </button>
+                </form>
+
+                <div class="text-center mt-4">
+                    <a href="{% url 'home' %}" class="text-muted-custom small text-decoration-none"><i class="bi bi-arrow-left me-1"></i>Back to Home</a>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

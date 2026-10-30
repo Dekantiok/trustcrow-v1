@@ -1,0 +1,36 @@
+{% extends 'base.html' %}
+{% block title %}Verify Email — Trustcrow{% endblock %}
+{% block body_class %}form-dark{% endblock %}
+{% block content %}
+<div class="row justify-content-center">
+    <div class="col-12 col-md-8 col-lg-5">
+        <div class="card-custom">
+            <div class="card-body p-4 p-md-5 text-center">
+                <div class="d-inline-flex align-items-center justify-content-center mb-3 rounded-circle icon-badge">
+                    <i class="bi bi-envelope-check text-accent fs-3"></i>
+                </div>
+                <h3 class="fw-bold mb-2">Verify Your Email</h3>
+                <p class="text-muted-custom small mb-4">We sent a 6-digit code to<br><strong class="mono-text">{{ email }}</strong></p>
+
+                {% if error_message %}
+                    <div class="alert alert-danger border-0 py-2 small text-start"><i class="bi bi-exclamation-circle me-1"></i>{{ error_message }}</div>
+                {% endif %}
+
+                <form method="post">
+                    {% csrf_token %}
+                    <div class="mb-3">
+                        <input type="text" name="otp" class="form-control form-control-lg text-center mono-text fs-3 otp-input" placeholder="000000" maxlength="6" minlength="6" inputmode="numeric" pattern="[0-9]*" autocomplete="one-time-code" required autofocus>
+                    </div>
+                    <button type="submit" class="btn btn-primary-custom btn-lg w-100">
+                        <i class="bi bi-shield-check me-2"></i>Verify & View Escrows
+                    </button>
+                </form>
+
+                <div class="text-center mt-4">
+                    <a href="{% url 'my_escrow' %}" class="text-muted-custom small text-decoration-none"><i class="bi bi-arrow-left me-1"></i>Use a different email</a>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

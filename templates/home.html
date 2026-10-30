@@ -1,0 +1,13 @@
+{% extends 'base.html' %}
+{% block title %}Trustcrow &middot; Secure P2P Escrow{% endblock %}
+{% block body_class %}landing-body{% endblock %}
+{% block content %}
+<div class="landing-wrap">
+    <h1 class="display-5 fw-bold hero-title">Money moves when<br>trust is <span class="hero-underline">guaranteed</span>.</h1>
+    <p class="lead mt-3 mb-4 mx-auto" style="color:#d4d4d4;max-width:34rem;">No accounts. No wallets. Fund the escrow, dispatch the goods, release only when approved.</p>
+    <div class="d-flex flex-column flex-sm-row gap-2 justify-content-center mx-auto" style="max-width:32rem;">
+        <a href="{% url 'create_contract' %}" class="btn btn-primary-custom btn-lg flex-sm-fill">Start New Contract</a>
+        <a href="{% url 'join_escrow_page' %}" class="btn btn-outline-light btn-lg flex-sm-fill">Join Escrow</a>
+    </div>
+</div>
+{% endblock %}

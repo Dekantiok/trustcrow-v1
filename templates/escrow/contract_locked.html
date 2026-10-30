@@ -1,0 +1,32 @@
+{% extends 'base.html' %}
+{% block title %}Verify to view escrow &middot; Trustcrow{% endblock %}
+
+{% block content %}
+<div class="row justify-content-center">
+    <div class="col-12 col-md-8 col-lg-5">
+        <div class="card card-custom shadow-sm">
+            <div class="card-body p-4 text-center">
+                <div class="d-inline-flex align-items-center justify-content-center mb-3 rounded-circle icon-badge">
+                    <i class="bi bi-shield-lock fs-3"></i>
+                </div>
+                <h1 class="h4 text-navy fw-bold mb-2">This escrow is private</h1>
+                <p class="text-muted small mb-4">
+                    Escrow <span class="mono-text fw-bold">{{ contract.code }}</span> is
+                    currently marked <strong>{{ status_label }}</strong>. Only the buyer and
+                    seller can see its amount, parties and actions.
+                </p>
+                <div class="divider"></div>
+                <p class="text-muted small mb-4">
+                    If you are a party to this escrow, verify the email address you used.
+                </p>
+                <a href="{% url 'my_escrow' %}" class="btn btn-primary-custom w-100 mb-2">
+                    <i class="bi bi-shield-check me-1"></i>Verify my email
+                </a>
+                <a href="{% url 'home' %}" class="btn btn-outline-dark-custom w-100">
+                    Back to home
+                </a>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
