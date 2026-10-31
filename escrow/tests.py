@@ -1097,17 +1097,26 @@ class SmokeTest(TestCase):
         """Each escrow route must be reachable by name from config.urls."""
         from config import urls as project_urls
 
-        patterns = [
-            p for p in project_urls.urlpatterns
-            if getattr(p, 'app_name', None) != 'admin' and not p.name.startswith('admin')
-        ]
-        self.assertGreater(len(patterns), 5, 'expected the escrow routes to be registered')
-        for pattern in patterns:
-            with self.subTest(name=pattern.name):
-                kwargs = {
-                    key: 'TESTCODE' for key in pattern.pattern.regex.groupindex
-                }
-                self.assertTrue(reverse(pattern.name, kwargs=kwargs or None))
+        entries = []
+        for p in project_urls.urlpatterns:
+            if getattr(p, 'app_name', None) == 'admin':
+                continue
+            if hasattr(p, 'url_patterns'):
+                # An included route set (e.g. the assistant): qualify names
+                # with the namespace the same way reverse() expects.
+                namespace = getattr(p, 'namespace', None)
+                for sub in p.url_patterns:
+                    name = f"{namespace}:{sub.name}" if namespace else sub.name
+                    entries.append((name, sub.pattern.regex.groupindex))
+                continue
+            if (p.name or '').startswith('admin'):
+                continue
+            entries.append((p.name, p.pattern.regex.groupindex))
+        self.assertGreater(len(entries), 5, 'expected the escrow routes to be registered')
+        for name, groupindex in entries:
+            with self.subTest(name=name):
+                kwargs = {key: 'TESTCODE' for key in groupindex}
+                self.assertTrue(reverse(name, kwargs=kwargs or None))
 
     def test_no_references_to_removed_templates(self):
         # This file names the removed templates on purpose, so it is excluded.

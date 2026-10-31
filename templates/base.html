@@ -181,7 +181,10 @@
     <nav class="navbar navbar-expand-lg navbar-dark navbar-custom sticky-top">
         <div class="container d-flex flex-wrap gap-2">
             <a class="navbar-brand fw-bold fs-4 me-auto text-white" href="{% url 'home' %}">Trustcrow</a>
-            <div class="d-flex align-items-center">
+            <div class="d-flex align-items-center gap-2">
+                <a href="{% url 'agent:chat' %}" class="btn btn-sm btn-outline-light me-2">
+                    <i class="bi bi-stars me-1"></i>Assistant
+                </a>
                 {% if request.resolver_match.url_name != 'my_escrow' and request.resolver_match.url_name != 'my_escrow_verify_otp' and request.resolver_match.url_name != 'my_escrow_list' %}
                 <a href="{% url 'my_escrow' %}" class="btn btn-sm btn-outline-light">
                     <i class="bi bi-folder2-open me-1"></i>My Escrow

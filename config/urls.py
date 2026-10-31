@@ -1,5 +1,5 @@
 from django.contrib import admin
-from django.urls import path
+from django.urls import include, path
 from escrow import views
 
 urlpatterns = [
@@ -23,4 +23,5 @@ urlpatterns = [
     path('escrow/<str:code>/seller-dispute/', views.seller_raise_dispute, name='seller_raise_dispute'),
     path('escrow/<str:code>/cancel/', views.cancel_escrow, name='cancel_escrow'),
     path('escrow/<str:code>/vault/', views.seller_add_vault, name='seller_add_vault'),
+    path('assistant/', include('agent.urls')),
 ]

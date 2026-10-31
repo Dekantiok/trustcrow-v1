@@ -284,3 +284,81 @@ class LoopTest(TestCase):
         convo = self.make_conversation()
         with patch('agent.loop.chat', side_effect=BasetenAPIError('down')):
             self.assertEqual(run_turn(convo, 'hello'), DEGRADED_REPLY)
+
+
+class ChatViewTest(TestCase):
+    def setUp(self):
+        self.send_patcher = patch('escrow.services.send_otp_via_termii',
+                                  return_value=True)
+        self.mock_send = self.send_patcher.start()
+        self.addCleanup(self.send_patcher.stop)
+
+    def test_chat_page_creates_a_session_conversation(self):
+        from agent.models import AIConversation
+        response = self.client.get('/assistant/')
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(AIConversation.objects.filter(channel='web').count(), 1)
+
+    def test_send_runs_a_turn_and_renders_the_reply(self):
+        from agent.models import AIConversation, ConversationMessage
+
+        def fake_turn(conversation, text, base_url=''):
+            ConversationMessage.objects.create(
+                conversation_id=conversation.id,
+                role='user', content=text)
+            ConversationMessage.objects.create(
+                conversation_id=conversation.id,
+                role='assistant', content='Fee is ₦1,500.')
+            return 'Fee is ₦1,500.'
+
+        with patch('agent.views.run_turn', side_effect=fake_turn) as mock_turn:
+            response = self.client.post('/assistant/send/',
+                                        {'message': 'fee on 50000?'})
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'Fee is')
+        convo = AIConversation.objects.get(channel='web')
+        self.assertTrue(mock_turn.called)
+        self.assertEqual(convo.messages.filter(role='user').count(), 1)
+
+    def test_bare_code_goes_to_verification_not_the_model(self):
+        from unittest.mock import patch as mock_patch
+
+        from agent.models import AIConversation
+        self.client.post('/assistant/verify/', {'email': 'chat@example.com'})
+        session = self.client.session
+        self.assertEqual(session.get('chat_pending_email'), 'chat@example.com')
+        from escrow.models import AuthOTP
+        record = AuthOTP.objects.filter(
+            email='chat@example.com', intent='reauth', is_used=False).first()
+        self.assertIsNotNone(record)
+
+        with mock_patch('agent.views.run_turn') as mock_turn:
+            response = self.client.post('/assistant/send/', {'message': '000000'})
+            self.assertEqual(response.status_code, 200)
+            mock_turn.assert_not_called()
+        self.assertContains(response, 'not correct')
+        convo = AIConversation.objects.get(channel='web')
+        self.assertIsNone(convo.owner_email)
+
+    def test_correct_code_binds_the_conversation_owner(self):
+        from agent.models import AIConversation
+        self.client.post('/assistant/verify/', {'email': 'chat@example.com'})
+        # Read the plaintext the same way the user does: from the sent payload.
+        code = self.mock_send.call_args[0][1]
+        with patch('agent.views.run_turn') as mock_turn:
+            response = self.client.post('/assistant/send/', {'message': code})
+            mock_turn.assert_not_called()
+        convo = AIConversation.objects.get(channel='web')
+        self.assertEqual(convo.owner_email, 'chat@example.com')
+        self.assertContains(response, 'Verified')
+
+    def test_dismiss_clears_a_pending_proposal(self):
+        from agent.loop import get_or_create_conversation, propose_action
+        self.client.get('/assistant/')
+        from agent.models import AIConversation
+        convo = AIConversation.objects.get(channel='web')
+        propose_action(convo, 'request_dispute_submission', {'escrow_reference': 'X'})
+        response = self.client.post('/assistant/dismiss/')
+        self.assertEqual(response.status_code, 200)
+        convo.refresh_from_db()
+        self.assertEqual(convo.pending_action, {})
