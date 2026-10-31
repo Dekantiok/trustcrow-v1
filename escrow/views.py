@@ -129,7 +129,26 @@ def is_party(contract, request):
 
 
 def home_view(request):
-    return render(request, 'home.html')
+    from agent.loop import get_or_create_conversation
+    if not request.session.session_key:
+        request.session.save()
+    conversation = get_or_create_conversation(
+        'web', f"session:{request.session.session_key}"
+    )
+    verified = normalize_email(request.session.get('chat_verified_email', ''))
+    if verified and not conversation.owner_email:
+        conversation.owner_email = verified
+        conversation.save(update_fields=['owner_email'])
+    elif conversation.owner_email and conversation.owner_email != verified:
+        conversation.owner_email = verified or None
+        conversation.save(update_fields=['owner_email'])
+    pending = conversation.pending_action or {}
+    context = {
+        'messages': list(conversation.messages.order_by('id')),
+        'pending': pending if pending.get('tool') else None,
+        'owner_email': conversation.owner_email,
+    }
+    return render(request, 'home.html', context)
 
 
 def join_escrow_page(request):
@@ -368,7 +387,8 @@ def payment_callback(request, code):
             isinstance(result, dict) and result.get('status')
             and isinstance(data, dict) and data.get('status') == 'success'
             and data.get('reference') == contract.gateway_reference
-            and confirm_funding_payment(contract, data.get('amount'))
+            and confirm_funding_payment(
+                contract, data.get('amount'), currency=data.get('currency'))
         ):
             messages.success(
                 request,
@@ -453,9 +473,16 @@ def paystack_webhook(request):
             contract.code, amount_kobo, expected_kobo,
         )
         return HttpResponse("Amount mismatch", status=400)
+    if data.get('currency') and str(data['currency']).upper() != contract.currency.upper():
+        logger.error(
+            "Currency mismatch on %s: got %s expected %s",
+            contract.code, data.get('currency'), contract.currency,
+        )
+        return HttpResponse("Currency mismatch", status=400)
 
     moved = confirm_funding_payment(
-        contract, amount_kobo if amount_kobo is not None else expected_kobo
+        contract, amount_kobo if amount_kobo is not None else expected_kobo,
+        currency=data.get('currency'),
     )
     if moved:
         logger.info("Payment confirmed for contract %s", contract.code)

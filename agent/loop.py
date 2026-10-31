@@ -27,14 +27,40 @@ logger = logging.getLogger(__name__)
 SYSTEM_PROMPT = """You are Trustcrow's escrow assistant. You help users create and \
 track escrows safely.
 
+Style: reply in 1-2 short sentences, at most one question per message. \
+Sound like chat, not a form. Never send a long message.
+
+Drafting rules — extract, don't interrogate:
+- Pull every detail you can from what the user already wrote (e.g. \
+"sell my laptop for 250000 to ada@example.com" already gives title, \
+amount, counterparty, and creator_role=seller). Never ask for anything \
+the user already told you.
+- Save what you have immediately with create_escrow_draft, even partial, \
+and top it up with update_escrow_draft as more arrives. Missing \
+description? Reuse the title. Missing fee_payer? Assume buyer pays. \
+Missing inspection window? Assume 3 days. Fold assumptions into the \
+final summary instead of asking about them.
+- Only ask for what cannot be guessed: usually just their own email \
+address, plus the amount or the other party's email if truly absent. One \
+missing thing per message, most important first.
+- When the draft is complete, show the exact terms briefly and ask for \
+confirmation before calling request_escrow_creation.
+
 Rules you must follow:
 - Explain what you are about to do BEFORE doing anything consequential, \
 and only proceed after the user explicitly confirms the exact terms.
 - To create, fund, confirm, or dispute anything, use your tools — never \
 claim success from conversation alone.
-- You can only see escrows the verified user participates in. Never ask \
-for or repeat one-time codes; verification happens in the app, not in chat.
-- If you do not know something, say so. Keep replies short and concrete."""
+- Start helping immediately; no account or verification is needed to talk, \
+quote fees, or assemble a draft.
+- Creating an escrow needs two user steps: first they confirm the exact \
+terms, then they paste the 6-digit code sent to the creator email. That \
+code arrives as their next chat message — just continue the conversation; \
+the app verifies it with the backend and tells you the result through \
+your tools. Never ask the user to read a code aloud or type it anywhere \
+outside this chat; never repeat a code back.
+- You can only see escrows the verified user participates in.
+- If you do not know something, say so."""
 
 # A message that is only a 6-digit code is an OTP being pasted, not chat.
 OTP_MESSAGE_RE = re.compile(r'^\s*\d{6}\s*$')
@@ -123,7 +149,7 @@ def _history_messages(conversation, limit=20):
     return history
 
 
-def run_turn(conversation, user_text, base_url=''):
+def run_turn(conversation, user_text, base_url='', session_key=''):
     """Run one bounded turn. Always returns a reply string, never raises."""
     actor = (conversation.owner_email or '').strip() or None
     ConversationMessage.objects.create(
@@ -190,7 +216,25 @@ def run_turn(conversation, user_text, base_url=''):
                     outcome = execute(
                         name, arguments,
                         actor_email=actor, base_url=base_url,
+                        session_key=session_key,
                     )
+                    data = outcome.get('data') or {}
+                    verification_email = data.get(
+                        'verification_email') or (
+                        data.get('email') if data.get('verification_required') else None
+                    )
+                    if outcome.get('ok') and verification_email:
+                        # Creation is parked on email proof: remember what the
+                        # user is verifying for so the chat view can resume it
+                        # when the code arrives as the next chat message.
+                        conversation.pending_action = {
+                            'tool': name,
+                            'arguments': arguments,
+                            'proposed_at': timezone.now().isoformat(),
+                            'verification_email': verification_email,
+                            'draft_id': data.get('draft_id'),
+                        }
+                        conversation.save(update_fields=['pending_action'])
                 ConversationMessage.objects.create(
                     conversation=conversation,
                     role='tool',

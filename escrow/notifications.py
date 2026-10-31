@@ -9,8 +9,11 @@ DEFAULT_TIMEOUT = 15
 
 
 def send_otp_via_termii(email, otp_code):
-    if settings.DEBUG:
-        # Never emit a live credential to stdout; the dev banner is opt-in.
+    if settings.DEBUG and not getattr(settings, 'TERMII_SEND_IN_DEBUG', False):
+        # Local mock: pretend delivery succeeded so flows can be exercised
+        # without spending Termii credit. Nothing is emailed here — set
+        # TERMII_SEND_IN_DEBUG=True (with LOG_OTP_TO_CONSOLE as needed) for
+        # live local testing.
         if getattr(settings, 'LOG_OTP_TO_CONSOLE', False):
             logger.warning("DEVELOPMENT OTP for %s: %s", email, otp_code)
         return True

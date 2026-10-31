@@ -228,7 +228,11 @@ class EscrowDraft(models.Model):
         ('abandoned', 'Abandoned'),
     ]
 
-    owner_email = models.EmailField(db_index=True)
+    owner_email = models.EmailField(db_index=True, blank=True, default='')
+    # Browser/session that started this draft. Drafts are assemblable before
+    # email verification; the claim on owner_email is only proven when the
+    # creation OTP is consumed, at which point the session is bound to it.
+    owner_session = models.CharField(max_length=64, db_index=True, blank=True, default='')
     title = models.CharField(max_length=255, blank=True)
     description = models.TextField(blank=True)
     amount = models.DecimalField(max_digits=12, decimal_places=2, null=True, blank=True)

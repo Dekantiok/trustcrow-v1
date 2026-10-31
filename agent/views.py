@@ -1,8 +1,10 @@
 """Website AI assistant: chat UI over the shared agent loop.
 
-Verification binds the conversation to an email via the same OTP path as
-the manual flows. A bare 6-digit message while a verification is pending
-is routed to OTP consumption — never to the model.
+No upfront verification — anyone can start talking immediately. When the
+user confirms a draft, the creation tool sends a code to the creator email;
+pasting that 6-digit code as the next chat message resumes creation. A bare
+6-digit message while a verification is pending is routed to OTP
+consumption — never to the model.
 """
 import logging
 
@@ -15,7 +17,14 @@ from agent.loop import (
     get_or_create_conversation,
     run_turn,
 )
-from escrow.services import audit, consume_otp, issue_otp
+from escrow.forms import ContractCreationForm
+from escrow.models import EscrowDraft
+from escrow.services import (
+    audit,
+    consume_otp,
+    create_escrow_from_validated,
+    issue_otp,
+)
 from escrow.utils import normalize_email
 
 logger = logging.getLogger(__name__)
@@ -114,6 +123,109 @@ def chat_verify(request):
     )
 
 
+def _pending_creation(pending):
+    """Return (email, draft_id) when the pending action awaits a creation OTP."""
+    pending = pending or {}
+    email = pending.get('verification_email') or (
+        pending.get('email') if pending.get('verification_required') else ''
+    )
+    email = normalize_email(email or '')
+    draft_id = pending.get('draft_id') or (pending.get('arguments') or {}).get('draft_id')
+    if pending.get('tool') == 'request_escrow_creation' and email and draft_id:
+        return email, draft_id
+    return None, None
+
+
+def _try_resume_creation_with_code(request, conversation, text):
+    """Consume a pasted creation OTP and finish the escrow in-chat.
+
+    Returns the rendered thread response when this message was a creation
+    code attempt, else None so the caller falls through to the model.
+    The plaintext code is never stored or forwarded to the model.
+    """
+    pending = conversation.pending_action or {}
+    email, draft_id = _pending_creation(pending)
+    if not email:
+        return None
+    code = text.strip()
+    result = consume_otp(email, code, 'create')
+    conversation.messages.create(role='user', content='[one-time code withheld]')
+    if not result.ok:
+        conversation.messages.create(
+            role='assistant', content=result.message,
+        )
+        return render(
+            request, 'agent/_thread.html',
+            _thread_context(conversation, request),
+        )
+    try:
+        draft = EscrowDraft.objects.get(id=draft_id)
+    except (EscrowDraft.DoesNotExist, ValueError, TypeError):
+        conversation.messages.create(
+            role='assistant',
+            content="That draft is no longer available. Tell me the deal terms and we'll set it up again.",
+        )
+        conversation.pending_action = {}
+        conversation.save(update_fields=['pending_action'])
+        return render(
+            request, 'agent/_thread.html',
+            _thread_context(conversation, request),
+        )
+    session_key = request.session.session_key or ''
+    if not (
+        (draft.owner_email and draft.owner_email == email)
+        or (draft.owner_session and draft.owner_session == session_key)
+    ):
+        conversation.messages.create(
+            role='assistant',
+            content="That code does not match this chat session. Please confirm the draft again.",
+        )
+        return render(
+            request, 'agent/_thread.html',
+            _thread_context(conversation, request),
+        )
+    form = ContractCreationForm({
+        'title': draft.title,
+        'description': draft.description,
+        'amount': draft.amount,
+        'fee_payer': draft.fee_payer,
+        'creator_email': email,
+        'creator_role': draft.creator_role,
+        'counterparty_email': draft.counterparty_email,
+        'inspection_days': draft.inspection_days,
+    })
+    if not form.is_valid():
+        conversation.messages.create(
+            role='assistant',
+            content=("The draft is missing something — "
+                     "tell me the full deal terms and we'll fix it together."),
+        )
+        return render(
+            request, 'agent/_thread.html',
+            _thread_context(conversation, request),
+        )
+    contract = create_escrow_from_validated(form.cleaned_data)
+    draft.status = 'converted'
+    draft.save(update_fields=['status'])
+    conversation.owner_email = email
+    conversation.pending_action = {}
+    conversation.save(update_fields=['owner_email', 'pending_action'])
+    request.session['chat_verified_email'] = email
+    audit('escrow.created_via_agent', actor=email, escrow=contract)
+    conversation.messages.create(
+        role='assistant',
+        content=(
+            f"Verified — your escrow {contract.code} is created. "
+            "Share the code with the other party so they can join and verify; "
+            "I'll help track funding and delivery from here."
+        ),
+    )
+    return render(
+        request, 'agent/_thread.html',
+        _thread_context(conversation, request),
+    )
+
+
 @require_POST
 def chat_send(request):
     conversation = _conversation(request)
@@ -124,9 +236,16 @@ def chat_send(request):
             _thread_context(conversation, request),
         )
 
+    if OTP_MESSAGE_RE.match(text):
+        resumed = _try_resume_creation_with_code(
+            request, conversation, text)
+        if resumed is not None:
+            return resumed
+
     pending_email = request.session.get('chat_pending_email', '')
     if pending_email and OTP_MESSAGE_RE.match(text):
-        # OTP interception: verify in the backend, never show the model.
+        # Legacy upfront chat verification: keep consuming it for old
+        # sessions, but the UI no longer starts this flow.
         result = consume_otp(pending_email, text, 'reauth')
         conversation.messages.create(role='user', content='[one-time code withheld]')
         if result.ok:
@@ -149,7 +268,8 @@ def chat_send(request):
         )
 
     base_url = request.build_absolute_uri('/')[:-1]
-    run_turn(conversation, text, base_url=base_url)
+    session_key = request.session.session_key or ''
+    run_turn(conversation, text, base_url=base_url, session_key=session_key)
     conversation.refresh_from_db()
     return render(
         request, 'agent/_thread.html',

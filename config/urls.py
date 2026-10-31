@@ -24,4 +24,5 @@ urlpatterns = [
     path('escrow/<str:code>/cancel/', views.cancel_escrow, name='cancel_escrow'),
     path('escrow/<str:code>/vault/', views.seller_add_vault, name='seller_add_vault'),
     path('assistant/', include('agent.urls')),
+    path('webhooks/whatsapp/', include('whatsapp.urls')),
 ]

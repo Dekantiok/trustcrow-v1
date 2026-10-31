@@ -98,6 +98,10 @@
         .landing-wrap .hero-underline { color: var(--color-primary); }
         .landing-wrap .btn-outline-light { border-width: 2px; font-weight: 600; border-radius: 0.65rem; }
         .landing-wrap .btn-outline-light:hover { background-color: var(--color-white); color: var(--color-black); border-color: var(--color-white); }
+        /* Chat card on the black landing page: reset the inherited white
+           text to dark, otherwise assistant bubbles render white-on-white
+           and look empty until highlighted. */
+        .landing-body .card-custom { color: var(--color-black); }
 
         /* Dark form pages (create / join / verify / vault): near-black
            cards on the black page, red focus rings, dark inputs. */

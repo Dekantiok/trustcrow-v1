@@ -67,7 +67,8 @@ class EscrowContractAdmin(admin.ModelAdmin):
                 isinstance(result, dict) and result.get('status')
                 and isinstance(data, dict) and data.get('status') == 'success'
                 and data.get('reference') == contract.gateway_reference
-                and confirm_funding_payment(contract, data.get('amount'))
+                and confirm_funding_payment(
+                    contract, data.get('amount'), currency=data.get('currency'))
             ):
                 verified += 1
             else:

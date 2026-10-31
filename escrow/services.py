@@ -224,13 +224,24 @@ def _transfer_succeeded(result):
     return result.get('message') == 'Success'
 
 
-def confirm_funding_payment(contract, amount_kobo):
+def confirm_funding_payment(contract, amount_kobo, currency=None):
     """Mark a funded contract as awaiting_dispatch.
 
     Shared by the webhook and the callback fallback. The move is a single
     conditional UPDATE, so concurrent confirmations can only advance the
     contract once. Returns True when this call moved it.
     """
+    if (
+        EscrowContract.objects.filter(pk=contract.pk, status='awaiting_funding').count()
+        == 0
+    ):
+        return False
+    if currency and str(currency).upper() != contract.currency.upper():
+        logger.error(
+            "Currency mismatch on %s: got %s expected %s",
+            contract.code, currency, contract.currency,
+        )
+        return False
     if (
         EscrowContract.objects.filter(pk=contract.pk, status='awaiting_funding').count()
         == 0

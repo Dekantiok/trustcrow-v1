@@ -99,6 +99,8 @@ Copy `.env.example` → `.env`. Never commit `.env`.
 | `/escrow/<code>/pay/` | `initiate_payment` | Start Paystack checkout |
 | `/escrow/<code>/callback/` | `payment_callback` | Paystack return |
 | `/webhooks/paystack/` | `paystack_webhook` | Payment confirmation |
+| `/webhooks/whatsapp/` | `whatsapp:webhook` | WhatsApp Cloud API (verify + inbound + statuses) |
+| `/assistant/` | `agent:chat` | Website AI assistant |
 | `/escrow/<code>/dispatch/` `/receipt/` `/release/` `/dispute/` `/seller-dispute/` `/cancel/` `/vault/` | — | Lifecycle actions |
 | `/my-escrow/` `/my-escrow/verify/` `/my-escrow/list/` | `my_escrow*` | Email+OTP deal lookup |
 

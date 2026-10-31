@@ -302,7 +302,7 @@ class ChatViewTest(TestCase):
     def test_send_runs_a_turn_and_renders_the_reply(self):
         from agent.models import AIConversation, ConversationMessage
 
-        def fake_turn(conversation, text, base_url=''):
+        def fake_turn(conversation, text, base_url='', session_key='', **kwargs):
             ConversationMessage.objects.create(
                 conversation_id=conversation.id,
                 role='user', content=text)

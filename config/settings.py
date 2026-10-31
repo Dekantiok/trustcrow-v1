@@ -22,6 +22,19 @@ ALLOWED_HOSTS = [
     if host.strip()
 ]
 
+if DEBUG:
+    # Local tunnel providers (cloudflared quick tunnels, ngrok, localtunnel)
+    # mint a random public host on every run. Allow their suffixes in dev
+    # only, so Paystack webhooks and callbacks can reach this machine without
+    # editing env and restarting on each tunnel. Never enable in production:
+    # the DEBUG-off guard above already refuses the default host list.
+    ALLOWED_HOSTS += [
+        suffix for suffix in (
+            '.trycloudflare.com', '.ngrok.io', '.ngrok-free.app', '.loca.lt',
+        )
+        if suffix not in ALLOWED_HOSTS
+    ]
+
 if not DEBUG and ALLOWED_HOSTS == ['127.0.0.1', 'localhost']:
     raise RuntimeError("DJANGO_ALLOWED_HOSTS must be set when DJANGO_DEBUG is off.")
 
@@ -34,6 +47,7 @@ INSTALLED_APPS = [
     'django.contrib.staticfiles',
     'escrow',
     'agent',
+    'whatsapp',
 ]
 
 MIDDLEWARE = [
@@ -144,6 +158,14 @@ PAYSTACK_SECRET_KEY = os.environ.get('PAYSTACK_SECRET_KEY', 'sk_test_dummy')
 TERMII_API_KEY = os.environ.get('TERMII_API_KEY', 'dummy_key')
 TERMII_EMAIL_CONFIG_ID = os.environ.get('TERMII_EMAIL_CONFIG_ID', 'default_config')
 
+# WhatsApp Business Platform Cloud API.
+WHATSAPP_ACCESS_TOKEN = os.environ.get('WHATSAPP_ACCESS_TOKEN', '')
+WHATSAPP_PHONE_NUMBER_ID = os.environ.get('WHATSAPP_PHONE_NUMBER_ID', '')
+WHATSAPP_BUSINESS_ACCOUNT_ID = os.environ.get('WHATSAPP_BUSINESS_ACCOUNT_ID', '')
+WHATSAPP_WEBHOOK_VERIFY_TOKEN = os.environ.get('WHATSAPP_WEBHOOK_VERIFY_TOKEN', '')
+WHATSAPP_APP_SECRET = os.environ.get('WHATSAPP_APP_SECRET', '')
+WHATSAPP_API_VERSION = os.environ.get('WHATSAPP_API_VERSION', 'v21.0')
+
 # Baseten model inference (OpenAI-compatible endpoint). The model id is
 # verified against the project account; change it via the environment.
 BASETEN_API_KEY = os.environ.get('BASETEN_API_KEY', '')
@@ -171,6 +193,12 @@ OTP_ISSUE_COOLDOWN_SECONDS = int(os.environ.get('OTP_ISSUE_COOLDOWN_SECONDS', '6
 # Print one-time codes to the log while developing. Off by default so a
 # credential can never leak to a shared console.
 LOG_OTP_TO_CONSOLE = os.environ.get('LOG_OTP_TO_CONSOLE', 'False') == 'True'
+
+# Deliver real Termii emails while DEBUG is on. The notifications module
+# otherwise short-circuits to a mock in DEBUG (returns True without sending),
+# which is why a correct TERMII_API_KEY still sends nothing locally. Turn this
+# on only for live local testing — every OTP then costs a real Termii credit.
+TERMII_SEND_IN_DEBUG = os.environ.get('TERMII_SEND_IN_DEBUG', 'False') == 'True'
 
 # --- Security / deployment ---------------------------------------------------
 

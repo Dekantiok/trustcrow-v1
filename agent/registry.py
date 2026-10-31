@@ -56,14 +56,24 @@ def _get_participant_contract(escrow_reference, actor_email):
     return contract
 
 
-def _get_owned_draft(draft_id, actor_email):
+def _get_owned_draft(draft_id, actor_email, session_key=''):
+    """A draft belongs to the session that started it, or to the verified
+    email it claims once proven. Either credential opens it; neither leaks
+    the other — a miss is just 'not authorized'."""
     try:
         draft = EscrowDraft.objects.get(id=draft_id)
     except (EscrowDraft.DoesNotExist, ValueError, TypeError):
         raise ToolError("No draft found with that id.")
-    if draft.owner_email != actor_email:
-        raise ToolError("You are not authorized for this draft.")
-    return draft
+    if actor_email and draft.owner_email == actor_email:
+        return draft
+    if session_key and draft.owner_session == session_key:
+        return draft
+    raise ToolError("You are not authorized for this draft.")
+
+
+def _require_draft_identity(actor_email, session_key):
+    if not actor_email and not session_key:
+        raise ToolError("This conversation has no session to attach a draft to.")
 
 
 def _parse_amount(raw):
@@ -98,7 +108,9 @@ def tool_get_platform_information(actor, **kwargs):
             'the seller is paid.',
         ],
         'fees': 'A tiered service fee applies; ask for a fee quote for exact numbers.',
-        'auth': 'Email verification is required before creating or joining escrows.',
+        'auth': 'No account needed to start. When terms are confirmed, the '
+                'creator verifies their email with a one-time code and the '
+                'escrow is created.',
     }}
 
 
@@ -170,48 +182,85 @@ def tool_get_authorized_escrow_status(actor, **kwargs):
 
 
 def tool_create_escrow_draft(actor, **kwargs):
-    actor = _require_actor(actor)
+    session_key = kwargs.get('_session_key', '')
+    _require_draft_identity(actor, session_key)
     fields = {k: kwargs.get(k) for k in DRAFT_FIELDS if kwargs.get(k) not in (None, '')}
-    if 'counterparty_email' in fields and fields['counterparty_email'] == actor:
+    claimed = (kwargs.get('creator_email') or '').strip()
+    if claimed and actor and claimed != actor:
+        raise ToolError(
+            "That email does not match this verified chat. "
+            "Verify it first or use the verified address."
+        )
+    owner_email = actor or claimed
+    if 'counterparty_email' in fields and fields['counterparty_email'] == owner_email:
         raise ToolError("You cannot use your own email as the counterparty.")
-    draft = EscrowDraft.objects.create(owner_email=actor, **fields)
-    audit('draft.created', actor=actor, metadata={'draft_id': draft.id})
-    return {'ok': True, 'data': {'draft_id': draft.id, 'status': draft.status}}
+    draft = EscrowDraft.objects.create(
+        owner_email=owner_email, owner_session=session_key or '', **fields)
+    audit('draft.created', actor=owner_email or 'anonymous',
+          metadata={'draft_id': draft.id})
+    data = {'draft_id': draft.id, 'status': draft.status}
+    if not actor:
+        data['note'] = (
+            "Draft saved. Your email will be verified with a one-time code "
+            "when you confirm creation."
+        )
+    return {'ok': True, 'data': data}
 
 
 def tool_update_escrow_draft(actor, **kwargs):
-    actor = _require_actor(actor)
-    draft = _get_owned_draft(kwargs.get('draft_id'), actor)
+    session_key = kwargs.get('_session_key', '')
+    _require_draft_identity(actor, session_key)
+    draft = _get_owned_draft(kwargs.get('draft_id'), actor, session_key)
     if draft.status not in ('draft', 'proposed'):
         raise ToolError("This draft can no longer be edited.")
     for key in DRAFT_FIELDS:
         if kwargs.get(key) not in (None, ''):
             setattr(draft, key, kwargs[key])
-    if draft.counterparty_email == actor:
+    claimed = (kwargs.get('creator_email') or '').strip()
+    if claimed:
+        if actor and claimed != actor:
+            raise ToolError(
+                "That email does not match this verified chat."
+            )
+        draft.owner_email = actor or claimed
+    if draft.counterparty_email and draft.counterparty_email == draft.owner_email:
         raise ToolError("You cannot use your own email as the counterparty.")
     draft.save()
     return {'ok': True, 'data': {'draft_id': draft.id, 'status': draft.status}}
 
 
 def tool_get_escrow_draft(actor, **kwargs):
-    actor = _require_actor(actor)
-    draft = _get_owned_draft(kwargs.get('draft_id'), actor)
+    session_key = kwargs.get('_session_key', '')
+    _require_draft_identity(actor, session_key)
+    draft = _get_owned_draft(kwargs.get('draft_id'), actor, session_key)
     data = {key: getattr(draft, key) for key in ('id', 'status', *DRAFT_FIELDS)}
     data['amount'] = str(data['amount']) if data['amount'] is not None else None
+    data['creator_email'] = draft.owner_email
     return {'ok': True, 'data': data}
 
 
 def tool_request_escrow_creation(actor, **kwargs):
-    actor = _require_actor(actor)
-    draft = _get_owned_draft(kwargs.get('draft_id'), actor)
+    session_key = kwargs.get('_session_key', '')
+    _require_draft_identity(actor, session_key)
+    draft = _get_owned_draft(kwargs.get('draft_id'), actor, session_key)
     if draft.status not in ('draft', 'proposed'):
         raise ToolError("This draft was already used or abandoned.")
+    claimed = (draft.owner_email or '').strip()
+    if claimed and actor and actor != claimed:
+        raise ToolError(
+            "This draft was started for a different email address."
+        )
+    creator = claimed or actor
+    if not creator:
+        raise ToolError(
+            "I still need your email address before creating this escrow."
+        )
     form = ContractCreationForm({
         'title': draft.title,
         'description': draft.description,
         'amount': draft.amount,
         'fee_payer': draft.fee_payer,
-        'creator_email': actor,
+        'creator_email': creator,
         'creator_role': draft.creator_role,
         'counterparty_email': draft.counterparty_email,
         'inspection_days': draft.inspection_days,
@@ -224,15 +273,55 @@ def tool_request_escrow_creation(actor, **kwargs):
                 for field, errors in form.errors.items()
             )
         )
-    contract = create_escrow_from_validated(form.cleaned_data)
-    draft.status = 'converted'
-    draft.save(update_fields=['status'])
-    issue_otp(actor, 'create')
-    audit('escrow.created_via_agent', actor=actor, escrow=contract)
+    if actor == creator:
+        contract = create_escrow_from_validated(form.cleaned_data)
+        draft.status = 'converted'
+        draft.save(update_fields=['status'])
+        issue_otp(actor, 'create')
+        audit('escrow.created_via_agent', actor=actor, escrow=contract)
+        return {'ok': True, 'data': {
+            'reference': contract.code,
+            'status': contract.status,
+            'next': 'Verify the emailed code to activate the escrow.',
+        }}
+    # Unverified claim: prove the creator email first. The code is sent now;
+    # the user pastes it in chat, the backend verifies it, and this exact
+    # call resumes automatically — nothing is created before proof.
+    # Re-confirming while a code is live must not burn the cooldown into an
+    # error: the user is still on the same step, so remind them to paste it.
+    from escrow.models import AuthOTP
+    from django.utils import timezone as _tz
+    if issue_otp(creator, 'create') is None:
+        live = AuthOTP.objects.filter(
+            email=creator, intent='create', is_used=False,
+            expires_at__gt=_tz.now(),
+        ).exists()
+        if live:
+            audit('escrow.creation_challenged', actor=creator,
+                  metadata={'draft_id': draft.id, 'resend_skipped': True})
+            return {'ok': True, 'data': {
+                'verification_required': True,
+                'email': creator,
+                'draft_id': draft.id,
+                'next': (
+                    f"A verification code is already on its way to {creator}. "
+                    "Ask the user to paste it here; creation completes on verification."
+                ),
+            }}
+        raise ToolError(
+            "I could not send a verification code just now. "
+            "Please try confirming again in a minute."
+        )
+    audit('escrow.creation_challenged', actor=creator,
+          metadata={'draft_id': draft.id})
     return {'ok': True, 'data': {
-        'reference': contract.code,
-        'status': contract.status,
-        'next': 'Verify the emailed code to activate the escrow.',
+        'verification_required': True,
+        'email': creator,
+        'draft_id': draft.id,
+        'next': (
+            f"A verification code is on its way to {creator}. "
+            "Ask the user to paste it here; creation completes on verification."
+        ),
     }}
 
 
@@ -374,22 +463,29 @@ TOOLS = [
             {'escrow_reference': _str('The escrow code.')},
             ['escrow_reference']),
     _schema('create_escrow_draft',
-            'Save proposed terms as a draft. Nothing is created yet.',
+            'Save proposed terms as a draft — partial is fine, save early '
+            'and top up as details arrive. Nothing is created yet. Only '
+            'title, amount, creator_email and counterparty_email truly need '
+            'the user; assume fee_payer buyer, inspection_days 3, and reuse '
+            'the title as description unless told otherwise.',
             {'title': _str('What is being bought or delivered.'),
              'description': _str('Terms and delivery details.'),
              'amount': _str('Agreed amount in NGN.'),
              'currency': _str('Currency code, default NGN.'),
              'fee_payer': _str("'buyer' or 'seller'."),
+             'creator_email': _str('The user’s own email address.'),
              'creator_role': _str('Your role: buyer or seller.'),
              'counterparty_email': _str('Email of the other party.'),
              'inspection_days': _str('Inspection window, 1-30 days.')},
             []),
     _schema('update_escrow_draft',
-            'Edit your draft before it is used.',
+            'Top up or fix your draft with newly learned details before it '
+            'is used.',
             {'draft_id': {'type': 'integer', 'description': 'Draft id.'},
              'title': _str('New title.'), 'description': _str('New terms.'),
              'amount': _str('New amount in NGN.'),
              'fee_payer': _str("'buyer' or 'seller'."),
+             'creator_email': _str('The user’s own email address.'),
              'creator_role': _str('Your role: buyer or seller.'),
              'counterparty_email': _str('Email of the other party.'),
              'inspection_days': _str('Inspection window, 1-30 days.')},
@@ -400,7 +496,9 @@ TOOLS = [
             ['draft_id']),
     _schema('request_escrow_creation',
             'Create the escrow from a confirmed draft. Only call after the '
-            'user explicitly confirmed the exact terms.',
+            'user explicitly confirmed the exact terms. For an unverified '
+            'chat this sends a code to the creator email; the user pastes '
+            'it here in chat and creation completes on verification.',
             {'draft_id': {'type': 'integer', 'description': 'Draft id.'}},
             ['draft_id']),
     _schema('request_counterparty_invitation',
@@ -428,15 +526,19 @@ TOOLS = [
 ]
 
 
-def execute(name, arguments, actor_email=None, base_url=''):
+def execute(name, arguments, actor_email=None, base_url='', session_key=''):
     """Run one approved tool. Unknown tools and auth failures are errors,
     never exceptions — the loop relays them to the model."""
     handler = HANDLERS.get(name)
     if handler is None:
         return {'ok': False, 'error': f"Unknown tool '{name}'."}
     try:
-        result = handler(actor_email, **dict(arguments or {}),
-                         _base_url=base_url)
+        # Underscore keys are server plumbing, never model input: a model
+        # argument can never override the callback host or session binding.
+        args = {k: v for k, v in dict(arguments or {}).items()
+                if not k.startswith('_')}
+        result = handler(actor_email, _base_url=base_url,
+                         _session_key=session_key, **args)
     except ToolError as exc:
         logger.info("Tool %s refused: %s", name, exc)
         return {'ok': False, 'error': str(exc)}
