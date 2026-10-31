@@ -93,3 +93,194 @@ class BasetenClientTest(TestCase):
             result = chat([{'role': 'user', 'content': 'hi'}])
         self.assertEqual(result['usage']['prompt_tokens'], 10)
         self.assertEqual(result['usage']['completion_tokens'], 5)
+
+
+class RegistryTest(TestCase):
+    def setUp(self):
+        from escrow.models import EscrowContract
+        self.contract = EscrowContract.objects.create(
+            code='AGENT001',
+            title='Agent Item',
+            description='Terms agreed in chat',
+            amount=__import__('decimal').Decimal('50000.00'),
+            service_fee=__import__('decimal').Decimal('1500.00'),
+            fee_payer='buyer',
+            creator_email='buyer@example.com',
+            creator_role='buyer',
+            counterparty_email='seller@example.com',
+            status='awaiting_funding',
+            gateway_reference='REF_AGENT001',
+        )
+
+    def test_fee_quote_math(self):
+        from agent.registry import execute
+        result = execute('get_fee_quote', {'amount': '50000'},
+                         actor_email='buyer@example.com')
+        self.assertTrue(result['ok'])
+        self.assertEqual(result['data']['service_fee'], '1500')
+        self.assertEqual(result['data']['buyer_pays'], '51500')
+
+    def test_fee_quote_rejects_out_of_range(self):
+        from agent.registry import execute
+        result = execute('get_fee_quote', {'amount': '10'},
+                         actor_email='buyer@example.com')
+        self.assertFalse(result['ok'])
+
+    def test_unknown_tool_is_an_error_not_an_exception(self):
+        from agent.registry import execute
+        result = execute('delete_everything', {}, actor_email='a@b.com')
+        self.assertFalse(result['ok'])
+
+    def test_status_hidden_from_non_participant(self):
+        from agent.registry import execute
+        result = execute('get_authorized_escrow_status',
+                         {'escrow_reference': 'AGENT001'},
+                         actor_email='stranger@example.com')
+        self.assertFalse(result['ok'])
+
+    def test_status_visible_to_participant(self):
+        from agent.registry import execute
+        result = execute('get_authorized_escrow_status',
+                         {'escrow_reference': 'AGENT001'},
+                         actor_email='seller@example.com')
+        self.assertTrue(result['ok'])
+        self.assertEqual(result['data']['you_are'], 'seller')
+
+    def test_draft_isolation_between_owners(self):
+        from agent.registry import execute
+        created = execute('create_escrow_draft', {'title': 'Mine'},
+                          actor_email='buyer@example.com')
+        draft_id = created['data']['draft_id']
+        blocked = execute('update_escrow_draft', {'draft_id': draft_id},
+                          actor_email='seller@example.com')
+        self.assertFalse(blocked['ok'])
+        allowed = execute('get_escrow_draft', {'draft_id': draft_id},
+                          actor_email='buyer@example.com')
+        self.assertTrue(allowed['ok'])
+
+    def test_consequential_tool_needs_a_verified_actor(self):
+        from agent.registry import execute
+        result = execute('request_delivery_confirmation',
+                         {'escrow_reference': 'AGENT001', 'stage': 'receipt'},
+                         actor_email=None)
+        self.assertFalse(result['ok'])
+
+    def test_wrong_role_cannot_confirm(self):
+        from agent.registry import execute
+        result = execute('request_delivery_confirmation',
+                         {'escrow_reference': 'AGENT001', 'stage': 'dispatch'},
+                         actor_email='buyer@example.com')
+        self.assertFalse(result['ok'])
+
+
+class LoopTest(TestCase):
+    def make_conversation(self, owner=None):
+        from agent.loop import get_or_create_conversation
+        convo = get_or_create_conversation('web', 'sess-1')
+        convo.owner_email = owner
+        convo.save(update_fields=['owner_email'])
+        return convo
+
+    def script(self, rounds):
+        """Script agent.loop.chat to return `rounds` then a final reply."""
+        calls = list(rounds)
+
+        def fake_chat(messages, tools=None):
+            if calls:
+                return calls.pop(0)
+            return {'text': 'Done.', 'tool_calls': [], 'usage': {}}
+
+        return patch('agent.loop.chat', side_effect=fake_chat)
+
+    def test_non_consequential_tool_executes_freely(self):
+        from agent.loop import run_turn
+        convo = self.make_conversation(owner='buyer@example.com')
+        rounds = [{
+            'text': '',
+            'tool_calls': [{'id': 'c1', 'name': 'get_fee_quote',
+                            'arguments': {'amount': '50000'}}],
+            'usage': {},
+        }]
+        with self.script(rounds):
+            reply = run_turn(convo, 'What is the fee on 50000?')
+        self.assertTrue(reply)
+        tool_rows = convo.messages.filter(role='tool')
+        self.assertEqual(tool_rows.count(), 1)
+        import json
+        self.assertTrue(json.loads(tool_rows.first().content)['ok'])
+
+    def test_consequential_tool_waits_for_confirmation(self):
+        import json
+
+        from agent.loop import confirmed, run_turn
+        from escrow.models import EscrowContract
+        EscrowContract.objects.create(
+            code='AGENT002',
+            title='Disputed item',
+            description='Terms',
+            amount=__import__('decimal').Decimal('20000.00'),
+            service_fee=__import__('decimal').Decimal('1500.00'),
+            fee_payer='buyer',
+            creator_email='buyer@example.com',
+            creator_role='buyer',
+            counterparty_email='seller@example.com',
+            status='in_transit',
+            gateway_reference='REF_AGENT002',
+        )
+        convo = self.make_conversation(owner='buyer@example.com')
+        call = {'id': 'c1', 'name': 'request_dispute_submission',
+                'arguments': {'escrow_reference': 'AGENT002',
+                              'reason': 'Never arrived'}}
+
+        with self.script([{'text': '', 'tool_calls': [call], 'usage': {}}]):
+            first_reply = run_turn(convo, 'Raise a dispute, it never arrived.')
+        self.assertTrue(first_reply)
+        pending = convo.messages.filter(role='tool').order_by('-id').first()
+        outcome = json.loads(pending.content)
+        self.assertFalse(outcome['ok'])
+        self.assertIn('CONFIRMATION_REQUIRED', outcome['error'])
+        self.assertEqual(
+            EscrowContract.objects.get(code='AGENT002').status, 'in_transit')
+
+        convo.refresh_from_db()
+        with self.script([{'text': '', 'tool_calls': [call], 'usage': {}}]):
+            run_turn(convo, 'Yes, I confirm — raise it.')
+        self.assertEqual(
+            EscrowContract.objects.get(code='AGENT002').status, 'disputed')
+        convo.refresh_from_db()
+        self.assertFalse(confirmed(convo, call['name'], call['arguments']))
+
+    def test_changed_terms_need_fresh_confirmation(self):
+        from agent.loop import confirmed
+        convo = self.make_conversation(owner='buyer@example.com')
+        from agent.loop import propose_action
+        propose_action(convo, 'request_dispute_submission',
+                       {'escrow_reference': 'AGENT002', 'reason': 'Late'})
+        convo.refresh_from_db()
+        self.assertFalse(confirmed(
+            convo, 'request_dispute_submission',
+            {'escrow_reference': 'AGENT002', 'reason': 'Different reason'}))
+
+    def test_otp_is_withheld_from_model_context(self):
+        from agent.loop import run_turn
+        convo = self.make_conversation()
+        seen = []
+
+        def fake_chat(messages, tools=None):
+            seen.extend(messages)
+            return {'text': 'Please verify in the app.', 'tool_calls': [],
+                    'usage': {}}
+
+        with patch('agent.loop.chat', side_effect=fake_chat):
+            run_turn(convo, '123456')
+        user_texts = [m['content'] for m in seen if m['role'] == 'user']
+        self.assertTrue(user_texts)
+        for text in user_texts:
+            self.assertNotIn('123456', text)
+
+    def test_model_outage_degrades_to_manual_path(self):
+        from agent.client import BasetenAPIError
+        from agent.loop import DEGRADED_REPLY, run_turn
+        convo = self.make_conversation()
+        with patch('agent.loop.chat', side_effect=BasetenAPIError('down')):
+            self.assertEqual(run_turn(convo, 'hello'), DEGRADED_REPLY)

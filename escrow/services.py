@@ -76,6 +76,31 @@ def get_unique_contract_code(length=9, attempts=5):
     raise RuntimeError("Unable to allocate a unique escrow code.")
 
 
+def create_escrow_from_validated(cleaned_data):
+    """Create an escrow from validated creation data.
+
+    Single shared path for the manual form and the agent: code, fee,
+    status, and gateway reference are assigned here, never by callers.
+    """
+    contract = EscrowContract(
+        title=cleaned_data['title'],
+        description=cleaned_data['description'],
+        amount=cleaned_data['amount'],
+        fee_payer=cleaned_data['fee_payer'],
+        creator_email=normalize_email(cleaned_data['creator_email']),
+        creator_role=cleaned_data['creator_role'],
+        counterparty_email=normalize_email(cleaned_data['counterparty_email']),
+        inspection_days=cleaned_data.get('inspection_days') or 3,
+    )
+    contract.code = get_unique_contract_code(9)
+    contract.service_fee = calculate_service_fee(contract.amount)
+    contract.status = 'pending_verification'
+    contract.gateway_reference = f"{contract.code}_{int(now().timestamp())}"
+    contract.save()
+    audit('escrow.created', actor=contract.creator_email, escrow=contract)
+    return contract
+
+
 def issue_otp(email, intent):
     """
     Create and deliver a one-time code.

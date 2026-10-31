@@ -216,6 +216,43 @@ class SettlementVault(models.Model):
         return '*' * (len(self.account_number) - 4) + self.account_number[-4:]
 
 
+class EscrowDraft(models.Model):
+    """An incomplete or proposed transaction being assembled, usually with
+    the agent's help. Nothing here is a live escrow: creation happens only
+    through the validated creation path after explicit user confirmation."""
+
+    STATUS_CHOICES = [
+        ('draft', 'Draft'),
+        ('proposed', 'Proposed'),
+        ('converted', 'Converted'),
+        ('abandoned', 'Abandoned'),
+    ]
+
+    owner_email = models.EmailField(db_index=True)
+    title = models.CharField(max_length=255, blank=True)
+    description = models.TextField(blank=True)
+    amount = models.DecimalField(max_digits=12, decimal_places=2, null=True, blank=True)
+    currency = models.CharField(max_length=3, default='NGN')
+    fee_payer = models.CharField(max_length=10, blank=True)
+    creator_role = models.CharField(max_length=10, blank=True)
+    counterparty_email = models.EmailField(blank=True)
+    inspection_days = models.IntegerField(default=3)
+    status = models.CharField(max_length=15, choices=STATUS_CHOICES, default='draft')
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['-id']
+
+    def __str__(self):
+        return f"Draft {self.id} for {self.owner_email} ({self.status})"
+
+    def save(self, *args, **kwargs):
+        self.owner_email = normalize_email(self.owner_email)
+        self.counterparty_email = normalize_email(self.counterparty_email)
+        super().save(*args, **kwargs)
+
+
 class Identity(models.Model):
     """A verified user identity. No passwords — proof comes from OTP
     challenges recorded against a VerifiedContact."""

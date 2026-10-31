@@ -18,7 +18,7 @@ from .services import (
     confirm_funding_payment,
     consume_otp,
     contracts_for_email,
-    get_unique_contract_code,
+    create_escrow_from_validated,
     issue_otp,
     release_escrow_funds,
 )
@@ -158,12 +158,7 @@ def create_contract(request):
     if request.method == 'POST':
         form = ContractCreationForm(request.POST)
         if form.is_valid():
-            contract = form.save(commit=False)
-            contract.code = get_unique_contract_code(9)
-            contract.service_fee = calculate_service_fee(contract.amount)
-            contract.status = 'pending_verification'
-            contract.gateway_reference = f"{contract.code}_{int(now().timestamp())}"
-            contract.save()
+            contract = create_escrow_from_validated(form.cleaned_data)
             if issue_otp(contract.creator_email, 'create') is None:
                 messages.error(
                     request,
