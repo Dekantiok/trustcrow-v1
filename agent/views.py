@@ -288,6 +288,33 @@ def chat_send(request):
         if resumed is not None:
             return resumed
 
+    agent_pending = normalize_email(conversation.pending_email or '')
+    if agent_pending and OTP_MESSAGE_RE.match(text):
+        # Code the agent itself requested via request_verification_code:
+        # consume it here so joining/tracking finishes inside the chat.
+        result = consume_otp(agent_pending, text, 'reauth')
+        conversation.messages.create(role='user', content='[one-time code withheld]')
+        if result.ok:
+            request.session['chat_verified_email'] = agent_pending
+            request.session.pop('chat_pending_email', None)
+            conversation.owner_email = agent_pending
+            conversation.pending_email = None
+            conversation.save(update_fields=['owner_email', 'pending_email'])
+            conversation.messages.create(
+                role='assistant',
+                content=(f"Verified — I can now help with escrows for "
+                         f"{agent_pending}. What would you like to do?"),
+            )
+            audit('chat.verified', actor=agent_pending)
+        else:
+            conversation.messages.create(
+                role='assistant', content=result.message,
+            )
+        return render(
+            request, 'agent/_thread.html',
+            _thread_context(conversation, request),
+        )
+
     pending_email = request.session.get('chat_pending_email', '')
     if pending_email and OTP_MESSAGE_RE.match(text):
         # Legacy upfront chat verification: keep consuming it for old

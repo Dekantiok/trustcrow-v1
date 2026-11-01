@@ -1,4 +1,4 @@
-"""The agent's only door into the platform: 13 approved tools.
+"""The agent's only door into the platform: 15 approved tools.
 
 Every handler receives the verified actor from the server-side session —
 never from model arguments. Anything the model sends is treated as
@@ -9,6 +9,8 @@ from decimal import Decimal, InvalidOperation
 
 from django.urls import reverse
 
+from escrow.utils import normalize_email
+
 from escrow.forms import ContractCreationForm, MAX_ESCROW_AMOUNT, MIN_ESCROW_AMOUNT
 from escrow.gateways import get_payment_gateway
 from escrow.models import EscrowContract, EscrowDraft
@@ -16,6 +18,7 @@ from escrow.lifecycle import notify_event
 from escrow.services import (
     audit,
     calculate_service_fee,
+    contracts_for_email,
     create_escrow_from_validated,
     issue_otp,
     release_escrow_funds,
@@ -157,6 +160,27 @@ def tool_validate_escrow_draft(actor, **kwargs):
             cleaned['amount'] + fee if cleaned['fee_payer'] == 'buyer'
             else cleaned['amount']
         ),
+    }}
+
+
+def tool_list_my_escrows(actor, **kwargs):
+    """Escrows the verified user participates in, newest first.
+
+    Answers "what's new / show my deals" without the user digging up a
+    code first. Active deals come first; pass include_closed for history.
+    """
+    actor = _require_actor(actor)
+    include_closed = bool(kwargs.get('include_closed', False))
+    rows = contracts_for_email(actor, include_closed=include_closed)[:10]
+    return {'ok': True, 'data': {
+        'escrows': [{
+            'reference': row.code,
+            'title': row.title,
+            'status': row.status,
+            'amount': str(row.amount),
+            'currency': row.currency,
+            'you_are': 'buyer' if actor == row.buyer_email else 'seller',
+        } for row in rows],
     }}
 
 
@@ -398,6 +422,52 @@ def tool_request_release_approval(actor, **kwargs):
     }}
 
 
+def tool_request_verification_code(actor, **kwargs):
+    """Send the in-chat email verification code (join/track/act flows).
+
+    Non-consequential: sending a code proves nothing by itself. Proof
+    happens when the user pastes it back and the backend consumes it.
+    """
+    del actor
+    email = normalize_email((kwargs.get('email') or '').strip())
+    if '@' not in email or '.' not in email or ' ' in email:
+        raise ToolError("I need a valid email address to send the code to.")
+    conversation = kwargs.get('_conversation')
+    if (conversation is not None and conversation.owner_email
+            and conversation.owner_email == email):
+        return {'ok': True, 'data': {
+            'already_verified': True, 'email': email,
+            'next': 'This chat is already verified for that email — carry on.',
+        }}
+    if issue_otp(email, 'reauth') is None:
+        from django.utils import timezone as _tz
+        from escrow.models import AuthOTP
+        live = AuthOTP.objects.filter(
+            email=email, intent='reauth', is_used=False,
+            expires_at__gt=_tz.now(),
+        ).exists()
+        if live:
+            if conversation is not None:
+                conversation.pending_email = email
+                conversation.save(update_fields=['pending_email'])
+            return {'ok': True, 'data': {
+                'verification_required': True, 'email': email,
+                'next': (f"A code is already on its way to {email}. "
+                         "Ask the user to paste it here; verification completes on entry."),
+            }}
+        raise ToolError(
+            "I could not send a code just now. Ask for the email again in a minute.")
+    if conversation is not None:
+        conversation.pending_email = email
+        conversation.save(update_fields=['pending_email'])
+    audit('chat.verification_requested', actor=email)
+    return {'ok': True, 'data': {
+        'verification_required': True, 'email': email,
+        'next': (f"A 6-digit code is on its way to {email}. "
+                 "Ask the user to paste it here in chat; everything continues on verification."),
+    }}
+
+
 def tool_request_dispute_submission(actor, **kwargs):
     actor = _require_actor(actor)
     contract = _get_participant_contract(kwargs.get('escrow_reference'), actor)
@@ -425,11 +495,13 @@ HANDLERS = {
     'create_escrow_draft': tool_create_escrow_draft,
     'update_escrow_draft': tool_update_escrow_draft,
     'get_escrow_draft': tool_get_escrow_draft,
+    'list_my_escrows': tool_list_my_escrows,
     'request_escrow_creation': tool_request_escrow_creation,
     'request_counterparty_invitation': tool_request_counterparty_invitation,
     'request_payment_link': tool_request_payment_link,
     'request_delivery_confirmation': tool_request_delivery_confirmation,
     'request_release_approval': tool_request_release_approval,
+    'request_verification_code': tool_request_verification_code,
     'request_dispute_submission': tool_request_dispute_submission,
 }
 
@@ -507,6 +579,14 @@ TOOLS = [
              'counterparty_email': _str('Email of the other party.'),
              'inspection_days': _str('Inspection window, 1-30 days.')},
             ['draft_id']),
+    _schema('list_my_escrows',
+            'List the verified user’s escrows (newest first) when they ask '
+            'what’s new, what needs them, or to see their deals. Then use '
+            'get_authorized_escrow_status or the next-step action they pick.',
+            {'include_closed': {
+                'type': 'boolean',
+                'description': 'Include completed/cancelled history.'}},
+            []),
     _schema('get_escrow_draft',
             'Read back your saved draft.',
             {'draft_id': {'type': 'integer', 'description': 'Draft id.'}},
@@ -539,6 +619,13 @@ TOOLS = [
             'only in inspection, only after explicit confirmation.',
             {'escrow_reference': _str('The escrow code.')},
             ['escrow_reference']),
+    _schema('request_verification_code',
+            'Send the email verification code so the user can join, track, '
+            'or act on an escrow. Call as soon as they share their email. '
+            'The user pastes the code here in chat — never send them '
+            'anywhere else; tell them to reply with it.',
+            {'email': _str('The user’s own email address to verify.')},
+            ['email']),
     _schema('request_dispute_submission',
             'Raise a dispute, freezing release until resolution. Only call '
             'after the user explicitly confirmed.',
@@ -548,7 +635,8 @@ TOOLS = [
 ]
 
 
-def execute(name, arguments, actor_email=None, base_url='', session_key=''):
+def execute(name, arguments, actor_email=None, base_url='', session_key='',
+            conversation=None):
     """Run one approved tool. Unknown tools and auth failures are errors,
     never exceptions — the loop relays them to the model."""
     handler = HANDLERS.get(name)
@@ -560,7 +648,8 @@ def execute(name, arguments, actor_email=None, base_url='', session_key=''):
         args = {k: v for k, v in dict(arguments or {}).items()
                 if not k.startswith('_')}
         result = handler(actor_email, _base_url=base_url,
-                         _session_key=session_key, **args)
+                         _session_key=session_key,
+                         _conversation=conversation, **args)
     except ToolError as exc:
         logger.info("Tool %s refused: %s", name, exc)
         return {'ok': False, 'error': str(exc)}

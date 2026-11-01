@@ -18,7 +18,7 @@ from .models import (
     TransitionError,
 )
 from .notifications import send_otp_via_termii
-from .utils import generate_otp, generate_secure_code, normalize_email
+from .utils import generate_escrow_code, generate_otp, generate_secure_code, normalize_email
 
 logger = logging.getLogger(__name__)
 
@@ -68,10 +68,10 @@ def chargeable_kobo(contract):
     return contract.total_charge_kobo
 
 
-def get_unique_contract_code(length=9, attempts=5):
-    """Reserve a code that is actually free rather than trusting 62^9 entropy."""
+def get_unique_contract_code(attempts=5):
+    """Reserve a TRST-prefixed code that is actually free."""
     for _ in range(attempts):
-        code = generate_secure_code(length)
+        code = generate_escrow_code()
         if not EscrowContract.objects.filter(code=code).exists():
             return code
     raise RuntimeError("Unable to allocate a unique escrow code.")
@@ -92,7 +92,7 @@ def create_escrow_from_validated(cleaned_data):
         counterparty_email=normalize_email(cleaned_data['counterparty_email']),
         inspection_days=cleaned_data.get('inspection_days') or 3,
     )
-    contract.code = get_unique_contract_code(9)
+    contract.code = get_unique_contract_code()
     contract.service_fee = calculate_service_fee(contract.amount)
     contract.status = 'pending_verification'
     contract.gateway_reference = f"{contract.code}_{int(now().timestamp())}"

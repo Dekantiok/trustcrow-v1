@@ -179,27 +179,25 @@ class NotifyTest(TestCase):
 
 
 class RecentUpdatesTest(TestCase):
-    def test_updates_reach_model_context(self):
-        from decimal import Decimal as D
+    def test_agent_lists_escrows_when_asked(self):
         contract = make_contract(code='UP01', status='awaiting_dispatch')
-        AuditEvent.objects.create(action='funding.confirmed', actor='system',
-                                  escrow=contract)
         convo = get_or_create_conversation('web', 'updates-1')
         convo.owner_email = 'buyer@x.com'
         convo.save(update_fields=['owner_email'])
-        seen = []
+        call = {'id': 'u1', 'name': 'list_my_escrows', 'arguments': {}}
+        with patch('agent.loop.chat', return_value={
+                'text': 'X', 'tool_calls': [call], 'usage': {}}):
+            run_turn(convo, 'anything new with my escrows?')
+        import json
+        tool_row = convo.messages.filter(role='tool').order_by('-id').first()
+        outcome = json.loads(tool_row.content)
+        self.assertTrue(outcome['ok'])
+        self.assertIn('UP01', json.dumps(outcome['data']))
 
-        def fake_chat(messages, tools=None):
-            seen.extend(messages)
-            return {'text': 'There is news.', 'tool_calls': [], 'usage': {}}
-
-        with patch('agent.loop.chat', side_effect=fake_chat):
-            run_turn(convo, 'anything new?')
-        systems = [m['content'] for m in seen if m['role'] == 'system']
-        self.assertTrue(any('UP01 funded' in s for s in systems),
-                        f"updates missing from context: {systems}")
-
-    def test_no_updates_no_note(self):
+    def test_no_proactive_brief_in_context(self):
+        contract = make_contract(code='UP02', status='awaiting_dispatch')
+        AuditEvent.objects.create(action='funding.confirmed', actor='system',
+                                  escrow=contract)
         convo = get_or_create_conversation('web', 'updates-2')
         convo.owner_email = 'buyer@x.com'
         convo.save(update_fields=['owner_email'])

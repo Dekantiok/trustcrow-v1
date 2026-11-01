@@ -71,7 +71,7 @@ class InvitationTest(TestCase):
         convo = AIConversation.objects.get(channel='web')
         session_key = self.client.session.session_key
         draft = EscrowDraft.objects.create(
-            owner_email='', owner_session=f'session:{session_key}',
+            owner_email='', owner_session=session_key,
             title='T', description='D', amount=Decimal('50000'),
             fee_payer='buyer', creator_role='buyer',
             counterparty_email='partner@x.com', inspection_days=3)

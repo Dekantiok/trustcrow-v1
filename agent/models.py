@@ -17,6 +17,10 @@ class AIConversation(models.Model):
     channel = models.CharField(max_length=15, choices=CHANNEL_CHOICES)
     channel_identity = models.CharField(max_length=255, db_index=True)
     owner_email = models.EmailField(null=True, blank=True, db_index=True)
+    # Email awaiting OTP proof for in-chat verification (website assistant).
+    # A bare 6-digit reply while this is set is consumed as the code —
+    # never forwarded to the model.
+    pending_email = models.EmailField(null=True, blank=True)
     # Awaiting user confirmation for one consequential tool call:
     # {'tool': name, 'arguments': {...}, 'proposed_at': iso-timestamp}.
     # Set when the agent presents a proposal, cleared on execution or

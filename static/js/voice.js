@@ -89,37 +89,61 @@
     btn.innerHTML = '<i class="bi bi-mic"></i>';
     btn.style.marginTop = '6px';
     var stop = null;
+    var startedAt = 0;
     var hint = document.createElement('small');
     hint.className = 'text-muted-custom d-block mt-1 voice-hint';
-    btn.addEventListener('click', function () {
-      if (stop) {
-        stop(); stop = null;
-        btn.innerHTML = '<i class="bi bi-hourglass-split"></i>';
-        btn.disabled = true;
-        return;
-      }
-      btn.innerHTML = '<i class="bi bi-stop-circle"></i> Recording… tap to stop';
+    btn.title = 'Hold to record a voice note';
+    btn.style.touchAction = 'none';
+    btn.addEventListener('contextmenu', function (e) { e.preventDefault(); });
+    function sendBlob(blob) {
+      stop = null;
+      postAudio(field.dataset.voiceUrl || '/assistant/transcribe/', blob, function (data) {
+        if (field.tagName === 'TEXTAREA' && field.value && data.transcript) field.value += ' ';
+        field.value += data.transcript || '';
+        field.dispatchEvent(new Event('input', { bubbles: true }));
+        btn.innerHTML = '<i class="bi bi-mic"></i>';
+        btn.disabled = false;
+        hint.textContent = '';
+      }, function (err) {
+        hint.textContent = (err && err.message) || 'Voice failed — please type.';
+        btn.innerHTML = '<i class="bi bi-mic"></i>';
+        btn.disabled = false;
+      });
+    }
+    btn.addEventListener('pointerdown', function (e) {
+      e.preventDefault();
+      if (stop || btn.disabled) return;
+      btn.innerHTML = '<i class="bi bi-stop-circle"></i> Recording… release to send';
       hint.textContent = '';
-      stop = recordOnce(function (blob) {
-        stop = null;
-        postAudio(field.dataset.voiceUrl || '/assistant/transcribe/', blob, function (data) {
-          if (field.tagName === 'TEXTAREA' && field.value && data.transcript) field.value += ' ';
-          field.value += data.transcript || '';
-          field.dispatchEvent(new Event('input', { bubbles: true }));
-          btn.innerHTML = '<i class="bi bi-mic"></i>';
-          btn.disabled = false;
-          hint.textContent = '';
-        }, function (err) {
-          hint.textContent = (err && err.message) || 'Voice failed — please type.';
-          btn.innerHTML = '<i class="bi bi-mic"></i>';
-          btn.disabled = false;
-        });
-      }, function () {
+      try { btn.setPointerCapture(e.pointerId); } catch (err) {}
+      startedAt = Date.now();
+      stop = recordOnce(sendBlob, function () {
         stop = null;
         btn.innerHTML = '<i class="bi bi-mic"></i>';
         hint.textContent = 'Microphone unavailable.';
       });
     });
+    function releaseToSend() {
+      if (!stop) return;
+      if (Date.now() - startedAt < 400) {
+        var s = stop; stop = null; s();
+        btn.innerHTML = '<i class="bi bi-mic"></i>';
+        hint.textContent = 'Hold the mic button while you speak.';
+        return;
+      }
+      var send = stop; stop = null;
+      btn.innerHTML = '<i class="bi bi-hourglass-split"></i>';
+      btn.disabled = true;
+      send();
+    }
+    function cancelHold() {
+      if (!stop) return;
+      var s = stop; stop = null;
+      btn.innerHTML = '<i class="bi bi-mic"></i>';
+    }
+    btn.addEventListener('pointerup', releaseToSend);
+    btn.addEventListener('pointerleave', releaseToSend);
+    btn.addEventListener('pointercancel', cancelHold);
     field.insertAdjacentElement('afterend', btn);
     btn.insertAdjacentElement('afterend', hint);
   }
@@ -137,47 +161,71 @@
     if (mic.dataset.voiceAttached) return;
     mic.dataset.voiceAttached = '1';
     var stop = null;
+    var startedAt = 0;
+    mic.title = 'Hold to record a voice note';
+    mic.style.touchAction = 'none';
+    mic.addEventListener('contextmenu', function (e) { e.preventDefault(); });
     function setIdle() {
       stop = null;
       mic.innerHTML = '<i class="bi bi-mic"></i>';
       mic.disabled = false;
     }
-    mic.addEventListener('click', function () {
-      if (stop) {
-        mic.disabled = true;
-        mic.innerHTML = '<i class="bi bi-hourglass-split"></i>';
-        if (hint) hint.textContent = 'Transcribing…';
-        stop();
-        stop = null;
-        return;
-      }
+    function uploadBlob(blob) {
+      stop = null;
+      var fd = new FormData();
+      fd.append('audio', blob, 'note.webm');
+      fetch('/assistant/voice/', {
+        method: 'POST',
+        headers: { 'X-CSRFToken': csrfToken() },
+        body: fd,
+      }).then(function (resp) { return resp.text(); }).then(function (html) {
+        result.innerHTML = html;
+        if (typeof scrollThread === 'function') scrollThread();
+        else {
+          var thread = document.getElementById('chat-thread');
+          if (thread) thread.scrollTop = thread.scrollHeight;
+        }
+        if (hint) hint.textContent = '';
+        setIdle();
+      }).catch(function () {
+        if (hint) hint.textContent = 'Voice failed — please type instead.';
+        setIdle();
+      });
+    }
+    mic.addEventListener('pointerdown', function (e) {
+      e.preventDefault();
+      if (stop || mic.disabled) return;
       if (hint) hint.textContent = '';
       mic.innerHTML = '<i class="bi bi-stop-circle"></i>';
-      stop = recordOnce(function (blob) {
-        var fd = new FormData();
-        fd.append('audio', blob, 'note.webm');
-        fetch('/assistant/voice/', {
-          method: 'POST',
-          headers: { 'X-CSRFToken': csrfToken() },
-          body: fd,
-        }).then(function (resp) { return resp.text(); }).then(function (html) {
-          result.innerHTML = html;
-          if (typeof scrollThread === 'function') scrollThread();
-          else {
-            var thread = document.getElementById('chat-thread');
-            if (thread) thread.scrollTop = thread.scrollHeight;
-          }
-          if (hint) hint.textContent = '';
-          setIdle();
-        }).catch(function () {
-          if (hint) hint.textContent = 'Voice failed — please type instead.';
-          setIdle();
-        });
-      }, function () {
+      try { mic.setPointerCapture(e.pointerId); } catch (err) {}
+      startedAt = Date.now();
+      stop = recordOnce(uploadBlob, function () {
         if (hint) hint.textContent = 'Microphone unavailable.';
         setIdle();
       });
     });
+    function releaseToSend() {
+      if (!stop) return;
+      if (Date.now() - startedAt < 400) {
+        var s = stop; stop = null; s();
+        mic.innerHTML = '<i class="bi bi-mic"></i>';
+        if (hint) hint.textContent = 'Hold the mic button while you speak.';
+        return;
+      }
+      var send = stop; stop = null;
+      mic.disabled = true;
+      mic.innerHTML = '<i class="bi bi-hourglass-split"></i>';
+      if (hint) hint.textContent = 'Transcribing…';
+      send();
+    }
+    function cancelHold() {
+      if (!stop) return;
+      var s = stop; stop = null;
+      mic.innerHTML = '<i class="bi bi-mic"></i>';
+    }
+    mic.addEventListener('pointerup', releaseToSend);
+    mic.addEventListener('pointerleave', releaseToSend);
+    mic.addEventListener('pointercancel', cancelHold);
   }
 
   window.TrustcrowVoice = {

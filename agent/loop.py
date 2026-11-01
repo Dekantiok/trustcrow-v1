@@ -35,6 +35,8 @@ Drafting rules — extract, don't interrogate:
 "sell my laptop for 250000 to ada@example.com" already gives title, \
 amount, counterparty, and creator_role=seller). Never ask for anything \
 the user already told you.
+- Escrow codes look like TRST plus 5 letters/digits (e.g. TRSTaB3xK). When the user shares one, they want to join or check that escrow — ask for nothing else first except verification if needed.
+- Never mention, list, reopen, or resume a draft the user has not asked about in this conversation.
 - Save what you have immediately with create_escrow_draft, even partial, \
 and top it up with update_escrow_draft as more arrives. Missing \
 description? Reuse the title. Missing fee_payer? Assume buyer pays. \
@@ -50,7 +52,7 @@ waiting to be asked; after funding nudge the seller to dispatch; \
 after dispatch nudge the buyer to confirm receipt; in inspection \
 offer release or dispute; after release confirm the payout.
 - When asked for status or "what's next", check \
-get_authorized_escrow_status first — never answer from memory.
+list_my_escrows first when they ask what is new or what needs them, then get_authorized_escrow_status for the one they pick — never answer from memory.
 - When the draft is complete, FIRST call request_escrow_creation right \
 away — the backend holds it and tells you to present the exact terms. \
 THEN show the terms briefly and ask for confirmation. Never show terms \
@@ -73,6 +75,7 @@ code arrives as their next chat message — just continue the conversation; \
 the app verifies it with the backend and tells you the result through \
 your tools. Never ask the user to read a code aloud or type it anywhere \
 outside this chat; never repeat a code back.
+- If the user is not verified, get their email and call request_verification_code immediately — they paste the code here in chat and everything continues. Never send them to a form or page.
 - You can only see escrows the verified user participates in.
 - Never ask for an escrow code, email verification, or any identifying \
 detail unless the user wants to join, track, or act on a specific \
@@ -149,45 +152,6 @@ def _proposal_fresh(pending):
     age = (timezone.now() - moment).total_seconds()
     return 0 <= age < CONFIRMATION_TTL_SECONDS
 
-
-UPDATE_ACTIONS = {
-    'escrow.created': 'created',
-    'escrow.created_via_agent': 'created',
-    'escrow.created_via_whatsapp': 'created',
-    'funding.confirmed': 'funded',
-    'delivery.dispatch_confirmed': 'dispatched',
-    'delivery.receipt_confirmed': 'receipt confirmed, inspection running',
-    'payout.completed': 'paid out',
-    'dispute.submitted': 'disputed — frozen',
-}
-
-
-def _recent_updates_note(actor_email):
-    """One-line brief of lifecycle moves since the user's last visit.
-
-    Lets the agent open with what changed ("funded while you were away")
-    instead of waiting to be asked. Read-only over the audit trail.
-    """
-    if not actor_email:
-        return ''
-    from datetime import timedelta
-    from django.db.models import Q
-    from escrow.models import AuditEvent
-    cutoff = timezone.now() - timedelta(hours=48)
-    rows = (AuditEvent.objects
-            .filter(action__in=list(UPDATE_ACTIONS), created_at__gt=cutoff,
-                    escrow__isnull=False)
-            .filter(Q(escrow__creator_email=actor_email)
-                    | Q(escrow__counterparty_email=actor_email))
-            .select_related('escrow').order_by('-id')[:3])
-    bits = [f"{row.escrow.code} {UPDATE_ACTIONS.get(row.action, row.action)}"
-            for row in rows if row.escrow is not None]
-    if not bits:
-        return ''
-    return ("Since your last visit: " + "; ".join(bits) + ". "
-            "Mention what changed and offer the next step.")
-
-
 def _confirmation_reminder(pending):
     """Tell the model the exact awaiting proposal so it can echo it.
 
@@ -230,7 +194,9 @@ def reset_thread_unless_live(conversation):
     Refreshing shows an empty chat instead of stale history. A fresh
     (unexpired) proposal — awaiting confirmation or an emailed code — is
     left intact with its messages so an in-flight flow survives a reload.
-    Returns the live pending dict, or {}.
+    Anonymous drafts from earlier visits are abandoned (verified owners'
+    drafts are kept); the agent only ever touches a draft the user asks
+    about. Returns the live pending dict, or {}.
     """
     pending = conversation.pending_action or {}
     if pending.get('tool') and not _proposal_fresh(pending):
@@ -239,8 +205,37 @@ def reset_thread_unless_live(conversation):
         pending = {}
     if not pending.get('tool'):
         conversation.messages.all().delete()
+        _abandon_anonymous_drafts(conversation, pending)
         return {}
     return pending
+
+
+def _abandon_anonymous_drafts(conversation, pending):
+    """Drop last-visit drafts nobody verified.
+
+    Drafts are session-bound, so without this an unverified visitor would
+    be haunted by deals they described days ago. Verified owners' drafts
+    survive; the live proposal's draft always survives.
+    """
+    if conversation.channel != 'web':
+        return
+    from escrow.models import EscrowDraft
+    identity = conversation.channel_identity or ''
+    session_key = identity.split('session:', 1)[-1] if 'session:' in identity else ''
+    if not session_key:
+        return
+    live_draft = pending.get('draft_id') or (pending.get('arguments') or {}).get('draft_id')
+    qs = EscrowDraft.objects.filter(
+        owner_session=session_key, status__in=('draft', 'proposed'))
+    if live_draft:
+        try:
+            qs = qs.exclude(id=int(live_draft))
+        except (TypeError, ValueError):
+            pass
+    verified = (conversation.owner_email or '').strip().lower()
+    if verified:
+        qs = qs.exclude(owner_email=verified)
+    qs.update(status='abandoned')
 
 
 def confirmed(conversation, name, arguments):
@@ -285,9 +280,6 @@ def run_turn(conversation, user_text, base_url='', session_key=''):
             # Stale proposal: drop it so the model starts clean instead
             # of echoing dead arguments into another gated round-trip.
             clear_proposal(conversation)
-    updates_note = _recent_updates_note(actor)
-    if updates_note:
-        model_messages.append({'role': 'system', 'content': updates_note})
     max_iterations = getattr(settings, 'AGENT_MAX_ITERATIONS', 8)
 
     try:
@@ -346,6 +338,7 @@ def run_turn(conversation, user_text, base_url='', session_key=''):
                         name, arguments,
                         actor_email=actor, base_url=base_url,
                         session_key=session_key,
+                        conversation=conversation,
                     )
                     data = outcome.get('data') or {}
                     verification_email = data.get(
