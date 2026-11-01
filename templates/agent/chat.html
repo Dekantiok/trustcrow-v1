@@ -6,6 +6,14 @@
         <div class="d-flex align-items-center gap-2 mb-1">
             <i class="bi bi-stars text-accent fs-4"></i>
             <span class="mono-text text-accent small fw-bold">AI ASSISTANT</span>
+            <button type="button" class="btn btn-sm btn-outline-dark-custom ms-auto"
+                    hx-post="{% url 'agent:chat_new' %}"
+                    hx-target="#chat-result"
+                    hx-swap="innerHTML"
+                    hx-confirm="Start a fresh chat? This clears the current thread."
+                    aria-label="Start a new chat">
+                <i class="bi bi-plus-circle me-1"></i>New chat
+            </button>
         </div>
         <h2 class="fw-bold mb-2" style="letter-spacing:-0.02em;">Escrow Assistant</h2>
         <p class="text-muted-custom small mb-3">

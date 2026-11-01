@@ -393,3 +393,35 @@ class ChatViewTest(TestCase):
             response = self.client.post('/assistant/send/', {'message': 'discard it'})
             mock_turn.assert_called_once()
         self.assertEqual(response.status_code, 200)
+
+    def test_stale_proposal_hidden_and_cleared_on_load(self):
+        import datetime as _dt
+        from django.utils import timezone
+        self.client.get('/assistant/')
+        from agent.models import AIConversation
+        convo = AIConversation.objects.get(channel='web')
+        convo.pending_action = {
+            'tool': 'request_escrow_creation',
+            'arguments': {'draft_id': 1},
+            'proposed_at': (timezone.now() - _dt.timedelta(hours=2)).isoformat(),
+        }
+        convo.save(update_fields=['pending_action'])
+        response = self.client.get('/assistant/')
+        self.assertEqual(response.status_code, 200)
+        self.assertNotContains(response, 'Your call:')
+        convo.refresh_from_db()
+        self.assertEqual(convo.pending_action, {})
+
+    def test_new_chat_wipes_thread_and_proposal(self):
+        from agent.loop import get_or_create_conversation, propose_action
+        self.client.get('/assistant/')
+        from agent.models import AIConversation
+        convo = AIConversation.objects.get(channel='web')
+        convo.messages.create(role='user', content='hello')
+        propose_action(convo, 'request_dispute_submission', {'escrow_reference': 'X'})
+        response = self.client.post('/assistant/new/')
+        self.assertEqual(response.status_code, 200)
+        convo.refresh_from_db()
+        self.assertEqual(convo.messages.count(), 0)
+        self.assertEqual(convo.pending_action, {})
+        self.assertContains(response, 'What are we escrowing today?')

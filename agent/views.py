@@ -15,6 +15,7 @@ from django.views.decorators.http import require_POST
 
 from agent.loop import (
     OTP_MESSAGE_RE,
+    _proposal_fresh,
     clear_proposal,
     get_or_create_conversation,
     run_turn,
@@ -57,6 +58,12 @@ def _conversation(request):
 
 def _thread_context(conversation, request):
     pending = conversation.pending_action or {}
+    # A stale proposal must never resurface as a prompt after refresh:
+    # hide it here and drop it so the next turn starts clean.
+    if pending.get('tool') and not _proposal_fresh(pending):
+        clear_proposal(conversation)
+        conversation.refresh_from_db()
+        pending = {}
     return {
         'messages': list(conversation.messages.order_by('id')),
         'pending': pending if pending.get('tool') else None,
@@ -410,3 +417,16 @@ def transcribe_field(request):
     except VoiceTranscriptionError as exc:
         return JsonResponse({'ok': False, 'error': str(exc)}, status=422)
     return JsonResponse({'ok': True, 'transcript': transcript})
+
+
+@require_POST
+def chat_new(request):
+    """Start over: wipe this browser session's thread and any proposal."""
+    conversation = _conversation(request)
+    conversation.messages.all().delete()
+    clear_proposal(conversation)
+    audit('chat.restarted', actor=conversation.owner_email or 'anonymous')
+    return render(
+        request, 'agent/_thread.html',
+        _thread_context(conversation, request),
+    )
