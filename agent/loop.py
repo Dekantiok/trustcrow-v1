@@ -49,6 +49,11 @@ missing thing per message, most important first.
 next (counterparty verifies, then the buyer funds); when the \
 counterparty has joined, offer the buyer the payment link without \
 waiting to be asked; after funding nudge the seller to dispatch; \
+- When the user wants to fund or pay: check the escrow with \
+get_authorized_escrow_status first (you already know their verified \
+email — never re-ask), report what you find, then call \
+request_payment_link. Never declare the counterparty joined or not \
+joined without checking.
 after dispatch nudge the buyer to confirm receipt; in inspection \
 offer release or dispute; after release confirm the payout.
 - When asked for status or "what's next", check \
@@ -270,6 +275,11 @@ def run_turn(conversation, user_text, base_url='', session_key=''):
         [{'role': 'system', 'content': SYSTEM_PROMPT}]
         + _history_messages(conversation)
     )
+    if actor:
+        model_messages.append({'role': 'system', 'content':
+            f"This chat is verified as {actor} — that is the user you are "
+            f"talking to. Never ask for their email again; use it with your "
+            f"tools directly."})
     pending = conversation.pending_action or {}
     if pending.get('tool'):
         if _proposal_fresh(pending):

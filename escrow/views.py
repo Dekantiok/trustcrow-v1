@@ -212,8 +212,16 @@ def _verify_and_advance(request, contract, intent, next_status, email):
     result = consume_otp(email, request.POST.get('otp'), intent)
     if not result.ok:
         return None, result.message
+    # The inbox was just proven by OTP: record which side verified. The
+    # status tool and dashboard read these flags — without them a joined
+    # counterparty still looks "unverified".
+    confirmed_fields = {}
+    if email == contract.buyer_email:
+        confirmed_fields['buyer_confirmed'] = True
+    elif email == contract.seller_email:
+        confirmed_fields['seller_confirmed'] = True
     try:
-        contract.transition_to(next_status)
+        contract.transition_to(next_status, **confirmed_fields)
     except TransitionError:
         logger.warning(
             "Rejected %s -> %s on contract %s", contract.status, next_status, contract.code

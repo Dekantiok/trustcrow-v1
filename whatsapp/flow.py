@@ -128,8 +128,13 @@ def _try_resume_creation(conversation, link, wa_id, code, base_url=''):
     draft.save(update_fields=['status'])
     # The creator email was just proven by the consumed code — advance past
     # pending_verification so the counterparty can join.
+    confirmed_fields = {}
+    if email == contract.buyer_email:
+        confirmed_fields['buyer_confirmed'] = True
+    elif email == contract.seller_email:
+        confirmed_fields['seller_confirmed'] = True
     try:
-        contract.transition_to('awaiting_counterparty')
+        contract.transition_to('awaiting_counterparty', **confirmed_fields)
     except TransitionError:
         logger.warning("Created %s but could not advance it", contract.code)
     else:

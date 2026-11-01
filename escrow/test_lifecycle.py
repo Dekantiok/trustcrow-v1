@@ -211,3 +211,33 @@ class RecentUpdatesTest(TestCase):
             run_turn(convo, 'hi')
         systems = [m['content'] for m in seen if m['role'] == 'system']
         self.assertFalse(any('Since your last visit' in s for s in systems))
+
+class VerificationFlagsTest(TestCase):
+    def setUp(self):
+        patcher = patch('escrow.services.send_otp_via_termii', return_value=True)
+        self.mock_otp = patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def _join(self, code, email, intent, post_url):
+        from escrow.services import issue_otp
+        issue_otp(email, intent)
+        otp = self.mock_otp.call_args[0][1]
+        return self.client.post(post_url, {'otp': otp})
+
+    def test_join_sets_counterparty_flag(self):
+        contract = make_contract(code='FL01', status='awaiting_counterparty')
+        response = self._join('FL01', 'seller@x.com', 'join', f'/escrow/FL01/verify/')
+        self.assertEqual(response.status_code, 302)
+        contract.refresh_from_db()
+        self.assertTrue(contract.seller_confirmed)
+        result = execute('get_authorized_escrow_status',
+                         {'escrow_reference': 'FL01'}, actor_email='buyer@x.com')
+        self.assertTrue(result['ok'])
+        self.assertTrue(result['data']['counterparty_verified'])
+
+    def test_creator_verify_sets_creator_flag(self):
+        contract = make_contract(code='FL02', status='pending_verification')
+        response = self._join('FL02', 'buyer@x.com', 'create', '/verify/FL02/')
+        self.assertEqual(response.status_code, 302)
+        contract.refresh_from_db()
+        self.assertTrue(contract.buyer_confirmed)
