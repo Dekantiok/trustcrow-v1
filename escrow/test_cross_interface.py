@@ -36,12 +36,17 @@ class CrossInterfaceTest(TestCase):
     def test_all_paths_share_one_creation_function(self):
         from agent import registry
         from whatsapp import flow
-        self.assertIn(
-            'create_escrow_from_validated',
-            inspect.getsource(registry.tool_request_escrow_creation))
-        self.assertIn(
-            'create_escrow_from_validated',
-            inspect.getsource(flow._try_resume_creation))
+        from agent import views as agent_views
+        # The tool validates and parks on email proof; both resume paths
+        # (web chat, WhatsApp) create through the same shared function and
+        # advance to awaiting_counterparty so the counterparty can join.
+        tool_src = inspect.getsource(registry.tool_request_escrow_creation)
+        self.assertIn('verification_required', tool_src)
+        self.assertNotIn('create_escrow_from_validated', tool_src)
+        for resume_src in (inspect.getsource(agent_views._try_resume_creation_with_code),
+                           inspect.getsource(flow._try_resume_creation)):
+            self.assertIn('create_escrow_from_validated', resume_src)
+            self.assertIn('awaiting_counterparty', resume_src)
 
     def test_web_form_and_agent_records_are_consistent(self):
         form = ContractCreationForm(valid_data())

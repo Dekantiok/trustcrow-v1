@@ -461,3 +461,34 @@ class ChatViewTest(TestCase):
         response = self.client.get('/')
         self.assertEqual(response.status_code, 200)
         self.assertNotContains(response, 'stale home hi')
+
+    def test_creation_resume_advances_to_counterparty(self):
+        """Resume-after-code must leave the escrow joinable, not stranded."""
+        from escrow.models import EscrowDraft
+        from agent.loop import get_or_create_conversation
+        self.client.get('/assistant/')
+        from agent.models import AIConversation
+        from decimal import Decimal
+        convo = AIConversation.objects.get(channel='web')
+        session_key = self.client.session.session_key
+        draft = EscrowDraft.objects.create(
+            owner_email='', owner_session=f'session:{session_key}',
+            title='T', description='D', amount=Decimal('50000'),
+            fee_payer='buyer', creator_role='buyer',
+            counterparty_email='cp@example.com', inspection_days=3)
+        from agent.loop import propose_action
+        propose_action(convo, 'request_escrow_creation', {'draft_id': draft.id})
+        convo.pending_action['verification_email'] = 'creator@example.com'
+        convo.pending_action['draft_id'] = draft.id
+        convo.save(update_fields=['pending_action'])
+        draft.owner_email = 'creator@example.com'
+        draft.save(update_fields=['owner_email'])
+        from escrow.services import issue_otp
+        with patch('escrow.services.send_otp_via_termii', return_value=True) as mock_send:
+            issue_otp('creator@example.com', 'create')
+            code = mock_send.call_args[0][1]
+        response = self.client.post('/assistant/send/', {'message': code})
+        self.assertEqual(response.status_code, 200)
+        from escrow.models import EscrowContract
+        contract = EscrowContract.objects.get(creator_email='creator@example.com')
+        self.assertEqual(contract.status, 'awaiting_counterparty')

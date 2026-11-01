@@ -22,7 +22,7 @@ from agent.loop import (
     run_turn,
 )
 from escrow.forms import ContractCreationForm
-from escrow.models import EscrowDraft
+from escrow.models import EscrowDraft, TransitionError
 from escrow.services import (
     audit,
     consume_otp,
@@ -232,6 +232,13 @@ def _try_resume_creation_with_code(request, conversation, text):
     contract = create_escrow_from_validated(form.cleaned_data)
     draft.status = 'converted'
     draft.save(update_fields=['status'])
+    # The creator email was just proven by the consumed code — same as the
+    # manual /verify/ page — so advance past pending_verification now.
+    # Without this the counterparty join form refuses the escrow.
+    try:
+        contract.transition_to('awaiting_counterparty')
+    except TransitionError:
+        logger.warning("Created %s but could not advance it", contract.code)
     conversation.owner_email = email
     conversation.pending_action = {}
     conversation.save(update_fields=['owner_email', 'pending_action'])

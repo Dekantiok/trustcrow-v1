@@ -273,20 +273,10 @@ def tool_request_escrow_creation(actor, **kwargs):
                 for field, errors in form.errors.items()
             )
         )
-    if actor == creator:
-        contract = create_escrow_from_validated(form.cleaned_data)
-        draft.status = 'converted'
-        draft.save(update_fields=['status'])
-        issue_otp(actor, 'create')
-        audit('escrow.created_via_agent', actor=actor, escrow=contract)
-        return {'ok': True, 'data': {
-            'reference': contract.code,
-            'status': contract.status,
-            'next': 'Verify the emailed code to activate the escrow.',
-        }}
-    # Unverified claim: prove the creator email first. The code is sent now;
-    # the user pastes it in chat, the backend verifies it, and this exact
-    # call resumes automatically — nothing is created before proof.
+    # Every creation — verified chatter or not — parks on a fresh code for
+    # THIS escrow. The code is pasted in chat, the backend verifies it,
+    # and this exact call resumes: nothing is created before proof, and
+    # the resume step advances the escrow so the counterparty can join.
     # Re-confirming while a code is live must not burn the cooldown into an
     # error: the user is still on the same step, so remind them to paste it.
     from escrow.models import AuthOTP
