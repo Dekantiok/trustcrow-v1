@@ -95,7 +95,13 @@ def webhook(request):
             record.save(update_fields=['processed', 'processed_at'])
 
         try:
-            if message.get('type') != 'text' or not (message.get('text') or '').strip():
+            if message.get('type') in ('audio', 'voice'):
+                from . import adapter
+                from .flow import handle_voice_message
+                media_id = message.get('media_id') or ''
+                audio_bytes = adapter.download_media(media_id) if media_id else None
+                handle_voice_message(sender, audio_bytes, base_url=base_url)
+            elif message.get('type') != 'text' or not (message.get('text') or '').strip():
                 # Non-text (image/audio/location/…): acknowledge + guide back.
                 from . import adapter
                 from agent.loop import get_or_create_conversation

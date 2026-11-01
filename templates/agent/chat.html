@@ -22,10 +22,14 @@
                 <form id="chat-form" hx-post="{% url 'agent:chat_send' %}" hx-target="#chat-result" hx-swap="innerHTML" class="d-flex gap-2">
                     {% csrf_token %}
                     <input type="text" name="message" id="chat-input" class="form-control" placeholder="Type your message…" autocomplete="off" maxlength="2000">
+                    <button type="button" id="chat-mic" class="btn btn-outline-dark-custom" aria-label="Record a voice note">
+                        <i class="bi bi-mic"></i>
+                    </button>
                     <button type="submit" class="btn btn-primary-custom" aria-label="Send">
                         <i class="bi bi-send"></i>
                     </button>
                 </form>
+                <small id="chat-voice-hint" class="text-muted-custom d-block mt-1"></small>
                 <p class="text-muted-custom small mt-2 mb-0">
                     Prefer forms? <a href="{% url 'create_contract' %}">Create an escrow manually</a>.
                 </p>
@@ -55,6 +59,7 @@
         else htmx.trigger(form, 'submit');
     };
     scrollThread();
+    if (window.TrustcrowVoice) TrustcrowVoice.initChatMic();
 })();
 </script>
 {% endblock %}

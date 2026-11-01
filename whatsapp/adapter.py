@@ -57,13 +57,18 @@ def parse_webhook_payload(payload):
                 sender = raw.get('from') or ''
                 msg_type = raw.get('type') or ''
                 text = ''
+                media_id = ''
                 if msg_type == 'text':
                     text_obj = raw.get('text') or {}
                     text = (text_obj.get('body') or '') if isinstance(text_obj, dict) else ''
+                elif msg_type in ('audio', 'voice'):
+                    media_obj = raw.get(msg_type) or {}
+                    media_id = (media_obj.get('id') or '') if isinstance(media_obj, dict) else ''
                 if wamid and sender:
                     messages.append({
                         'wamid': wamid, 'from': sender,
                         'type': msg_type, 'text': text or '',
+                        'media_id': media_id,
                     })
             for raw in value.get('statuses') or []:
                 if not isinstance(raw, dict):
@@ -112,3 +117,44 @@ def send_text_message(to_wa_id, body):
         )
         return False
     return True
+
+
+def download_media(media_id):
+    """Download a voice note / audio attachment. Returns bytes or None.
+
+    Capped at VOICE_MAX_BYTES so a hostile media id cannot fill memory.
+    Never raises — failures return None and the caller guides the user
+    back to text or a shorter recording.
+    """
+    token = getattr(settings, 'WHATSAPP_ACCESS_TOKEN', '')
+    api_version = getattr(settings, 'WHATSAPP_API_VERSION', 'v21.0')
+    if not token or not media_id:
+        return None
+    timeout = getattr(settings, 'GATEWAY_HTTP_TIMEOUT', 15)
+    try:
+        meta = requests.get(
+            f"https://graph.facebook.com/{api_version}/{media_id}",
+            headers={'Authorization': f'Bearer {token}'},
+            timeout=timeout,
+        )
+        if meta.status_code != 200:
+            logger.warning("WhatsApp media lookup failed: %s", meta.status_code)
+            return None
+        url = (meta.json() or {}).get('url') or ''
+        if not url:
+            return None
+        blob = requests.get(
+            url, headers={'Authorization': f'Bearer {token}'},
+            timeout=timeout + 15,
+        )
+        if blob.status_code != 200 or not blob.content:
+            logger.warning("WhatsApp media download failed: %s", blob.status_code)
+            return None
+    except Exception:
+        logger.exception("WhatsApp media download raised for %s", media_id)
+        return None
+    max_bytes = getattr(settings, 'VOICE_MAX_BYTES', 8 * 1024 * 1024)
+    if len(blob.content) > max_bytes:
+        logger.warning("WhatsApp media too large (%d bytes)", len(blob.content))
+        return None
+    return blob.content

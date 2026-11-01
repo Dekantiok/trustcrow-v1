@@ -3,20 +3,20 @@
     {% for message in messages %}
         {% if message.role == 'user' %}
             <div class="d-flex justify-content-end">
-                <div class="rounded-3 px-3 py-2 text-white" style="background-color: var(--color-black); max-width: 85%;">
+                <div class="rounded-3 px-3 py-2 bubble-mine">
                     {{ message.content|escape|urlize|linebreaksbr }}
                 </div>
             </div>
         {% elif message.role == 'assistant' and message.content %}
             <div class="d-flex justify-content-start">
-                <div class="rounded-3 px-3 py-2 border" style="background-color: var(--color-white); max-width: 85%;">
+                <div class="rounded-3 px-3 py-2 bubble-theirs">
                     {{ message.content|escape|urlize|linebreaksbr }}
                 </div>
             </div>
         {% endif %}
     {% empty %}
         <div class="d-flex justify-content-start">
-            <div class="rounded-3 px-3 py-2 border" style="background-color: var(--color-white); color: var(--color-black); max-width: 85%;">
+            <div class="rounded-3 px-3 py-2 bubble-theirs">
                 What are we escrowing today?
             </div>
         </div>

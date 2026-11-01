@@ -23,6 +23,11 @@ from escrow.utils import normalize_email
 
 from . import adapter
 from .models import WhatsAppLink
+from voice.transcriber import (
+    VoiceConfigError,
+    VoiceTranscriptionError,
+    transcribe_audio,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -210,3 +215,25 @@ def handle_text_message(wa_id, text, base_url=''):
     reply = run_turn(conversation, text, base_url=base_url, session_key=_session_key(wa_id))
     adapter.send_text_message(wa_id, reply or '')
     return reply or ''
+
+
+def handle_voice_message(wa_id, audio_bytes, base_url=''):
+    """Voice note into the agent: transcribe, then process as a text turn.
+
+    The transcript is recorded as the user message so the conversation
+    keeps a readable history. Transcription failures degrade to a typed
+    follow-up, never to silence.
+    """
+    if not audio_bytes:
+        reply = ("I couldn't download that voice note. "
+                 "Please try again or type your message.")
+        adapter.send_text_message(wa_id, reply)
+        return reply
+    try:
+        transcript = transcribe_audio(audio_bytes)
+    except (VoiceConfigError, VoiceTranscriptionError) as exc:
+        adapter.send_text_message(wa_id, str(exc))
+        return str(exc)
+    audit('whatsapp.voice_transcribed', actor=wa_id,
+          metadata={'chars': len(transcript)})
+    return handle_text_message(wa_id, transcript, base_url=base_url)

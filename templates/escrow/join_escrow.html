@@ -21,7 +21,7 @@
                     {% csrf_token %}
                     <div class="mb-3">
                         <label for="code" class="form-label">Escrow Code</label>
-                        <input type="text" name="code" id="code" class="form-control mono-text" placeholder="e.g., aB3xK9mP2" autocapitalize="characters" spellcheck="false" autocomplete="off" required autofocus>
+                        <input type="text" name="code" id="code" class="form-control mono-text" placeholder="e.g., aB3xK9mP2" autocapitalize="characters" spellcheck="false" autocomplete="off" required autofocus data-voice="1" data-voice-url="{% url 'agent:transcribe_field' %}">
                         <small class="text-muted-custom d-block mt-1">Found in your invite email or notification from the creator.</small>
                     </div>
                     <div class="mb-3">

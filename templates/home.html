@@ -3,11 +3,12 @@
 {% block body_class %}landing-body{% endblock %}
 {% block content %}
 <div class="landing-wrap">
+    <span class="eyebrow">Accountless escrow for Nigeria</span>
     <h1 class="display-5 fw-bold hero-title">Money moves when<br>trust is <span class="hero-underline">guaranteed</span>.</h1>
-    <p class="lead mt-3 mb-4 mx-auto" style="color:#d4d4d4;max-width:34rem;">No accounts. No wallets. Start in chat below, or use the manual path — both end in the same secure escrow.</p>
+    <p class="lead mt-3 mb-4 mx-auto text-muted-custom" style="max-width:34rem;">No accounts. No wallets. Speak or type in the chat below, or use the manual path — both end in the same secure escrow.</p>
     <div class="d-flex flex-column flex-sm-row gap-2 justify-content-center mx-auto mb-4" style="max-width:32rem;">
         <a href="{% url 'create_contract' %}" class="btn btn-primary-custom btn-lg flex-sm-fill">Start New Contract</a>
-        <a href="{% url 'join_escrow_page' %}" class="btn btn-outline-light btn-lg flex-sm-fill">Join Escrow</a>
+        <a href="{% url 'join_escrow_page' %}" class="btn btn-outline-dark-custom btn-lg flex-sm-fill">Join Escrow</a>
     </div>
     <div class="mx-auto" style="max-width:36rem;text-align:left;">
         <div class="card-custom">
@@ -18,10 +19,39 @@
                 <form id="chat-form" hx-post="{% url 'agent:chat_send' %}" hx-target="#chat-result" hx-swap="innerHTML" class="d-flex gap-2">
                     {% csrf_token %}
                     <input type="text" name="message" id="chat-input" class="form-control" placeholder="e.g. I want to sell my laptop for ₦250,000 to ada@example.com…" autocomplete="off" maxlength="2000">
+                    <button type="button" id="chat-mic" class="btn btn-outline-dark-custom" aria-label="Record a voice note">
+                        <i class="bi bi-mic"></i>
+                    </button>
                     <button type="submit" class="btn btn-primary-custom" aria-label="Send">
                         <i class="bi bi-send"></i>
                     </button>
                 </form>
+                <small id="chat-voice-hint" class="text-muted-custom d-block mt-1"></small>
+            </div>
+        </div>
+    </div>
+    <div class="mx-auto mt-5" style="max-width:56rem;text-align:left;">
+        <div class="row g-3">
+            <div class="col-12 col-md-4">
+                <div class="card-custom card-interactive h-100"><div class="card-body p-4">
+                    <span class="step-number mb-3">1</span>
+                    <h4 class="fs-6 fw-bold">Describe the deal</h4>
+                    <p class="small text-muted-custom mb-0">Type or speak the item, amount, and the other party's email. The assistant drafts it with you.</p>
+                </div></div>
+            </div>
+            <div class="col-12 col-md-4">
+                <div class="card-custom card-interactive h-100"><div class="card-body p-4">
+                    <span class="step-number mb-3">2</span>
+                    <h4 class="fs-6 fw-bold">Both sides verify</h4>
+                    <p class="small text-muted-custom mb-0">Each party confirms their email with a one-time code. No passwords, no accounts.</p>
+                </div></div>
+            </div>
+            <div class="col-12 col-md-4">
+                <div class="card-custom card-interactive h-100"><div class="card-body p-4">
+                    <span class="step-number mb-3">3</span>
+                    <h4 class="fs-6 fw-bold">Fund, inspect, release</h4>
+                    <p class="small text-muted-custom mb-0">Buyer funds via Paystack, seller dispatches, buyer inspects — then the seller is paid.</p>
+                </div></div>
             </div>
         </div>
     </div>
@@ -48,6 +78,7 @@
         else htmx.trigger(form, 'submit');
     };
     scrollThread();
+    if (window.TrustcrowVoice) TrustcrowVoice.initChatMic();
 })();
 </script>
 {% endblock %}

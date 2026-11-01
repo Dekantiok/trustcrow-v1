@@ -9,4 +9,6 @@ urlpatterns = [
     path('send/', views.chat_send, name='chat_send'),
     path('verify/', views.chat_verify, name='chat_verify'),
     path('dismiss/', views.chat_dismiss, name='chat_dismiss'),
+    path('voice/', views.chat_voice, name='chat_voice'),
+    path('transcribe/', views.transcribe_field, name='transcribe_field'),
 ]

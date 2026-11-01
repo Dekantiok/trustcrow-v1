@@ -8,6 +8,8 @@ consumption — never to the model.
 """
 import logging
 
+from django.core.cache import cache
+from django.http import JsonResponse
 from django.shortcuts import render
 from django.views.decorators.http import require_POST
 
@@ -26,6 +28,11 @@ from escrow.services import (
     issue_otp,
 )
 from escrow.utils import normalize_email
+from voice.transcriber import (
+    VoiceConfigError,
+    VoiceTranscriptionError,
+    transcribe_audio,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -289,3 +296,96 @@ def chat_dismiss(request):
         request, 'agent/_thread.html',
         _thread_context(conversation, request),
     )
+
+
+VOICE_THROTTLE_PER_HOUR = 20
+
+
+def _voice_throttled(request):
+    """Cheap per-session cap so the metered API can't be burned at will."""
+    if not request.session.session_key:
+        request.session.save()
+    key = f"voice:{request.session.session_key}"
+    count = cache.get(key, 0)
+    if count >= VOICE_THROTTLE_PER_HOUR:
+        return True
+    cache.set(key, count + 1, 3600)
+    return False
+
+
+def _transcribe_upload(uploaded):
+    audio_bytes = uploaded.read()
+    return transcribe_audio(audio_bytes)
+
+
+@require_POST
+def chat_voice(request):
+    """Voice note into the chat: transcribe, then run a normal agent turn."""
+    conversation = _conversation(request)
+    uploaded = request.FILES.get('audio')
+    if not uploaded:
+        conversation.messages.create(
+            role='assistant',
+            content="I didn't receive any audio. Please try recording again.",
+        )
+        return render(
+            request, 'agent/_thread.html',
+            _thread_context(conversation, request),
+        )
+    if _voice_throttled(request):
+        conversation.messages.create(
+            role='assistant',
+            content="You've used a lot of voice notes this hour — please type for a bit.",
+        )
+        return render(
+            request, 'agent/_thread.html',
+            _thread_context(conversation, request),
+        )
+    try:
+        transcript = _transcribe_upload(uploaded)
+    except VoiceConfigError as exc:
+        conversation.messages.create(role='assistant', content=str(exc))
+        return render(
+            request, 'agent/_thread.html',
+            _thread_context(conversation, request),
+        )
+    except VoiceTranscriptionError as exc:
+        conversation.messages.create(role='assistant', content=str(exc))
+        return render(
+            request, 'agent/_thread.html',
+            _thread_context(conversation, request),
+        )
+    audit('chat.voice_transcribed', actor=conversation.owner_email or 'anonymous',
+          metadata={'chars': len(transcript)})
+    if OTP_MESSAGE_RE.match(transcript.strip()):
+        resumed = _try_resume_creation_with_code(
+            request, conversation, transcript.strip())
+        if resumed is not None:
+            return resumed
+    base_url = request.build_absolute_uri('/')[:-1]
+    session_key = request.session.session_key or ''
+    run_turn(conversation, transcript, base_url=base_url, session_key=session_key)
+    conversation.refresh_from_db()
+    return render(
+        request, 'agent/_thread.html',
+        _thread_context(conversation, request),
+    )
+
+
+@require_POST
+def transcribe_field(request):
+    """Transcribe a short field-level recording; returns JSON for forms."""
+    uploaded = request.FILES.get('audio')
+    if not uploaded:
+        return JsonResponse({'ok': False, 'error': 'No audio received.'})
+    if _voice_throttled(request):
+        return JsonResponse(
+            {'ok': False, 'error': 'Voice limit reached for this hour.'},
+            status=429)
+    try:
+        transcript = _transcribe_upload(uploaded)
+    except VoiceConfigError as exc:
+        return JsonResponse({'ok': False, 'error': str(exc)}, status=503)
+    except VoiceTranscriptionError as exc:
+        return JsonResponse({'ok': False, 'error': str(exc)}, status=422)
+    return JsonResponse({'ok': True, 'transcript': transcript})

@@ -47,6 +47,7 @@ INSTALLED_APPS = [
     'django.contrib.staticfiles',
     'escrow',
     'agent',
+    'voice',
     'whatsapp',
 ]
 
@@ -137,6 +138,7 @@ USE_TZ = True
 
 STATIC_URL = 'static/'
 STATIC_ROOT = BASE_DIR / 'staticfiles'
+STATICFILES_DIRS = [BASE_DIR / 'static']
 STORAGES = {
     'default': {
         'BACKEND': 'django.core.files.storage.FileSystemStorage',
@@ -165,6 +167,14 @@ WHATSAPP_BUSINESS_ACCOUNT_ID = os.environ.get('WHATSAPP_BUSINESS_ACCOUNT_ID', ''
 WHATSAPP_WEBHOOK_VERIFY_TOKEN = os.environ.get('WHATSAPP_WEBHOOK_VERIFY_TOKEN', '')
 WHATSAPP_APP_SECRET = os.environ.get('WHATSAPP_APP_SECRET', '')
 WHATSAPP_API_VERSION = os.environ.get('WHATSAPP_API_VERSION', 'v21.0')
+
+# Muse Voice Transcribe (Meta Model API). Separate key from Baseten;
+# voice features degrade to typed input when unset.
+MODEL_API_KEY = os.environ.get('MODEL_API_KEY', '')
+ASR_BASE_URL = os.environ.get('ASR_BASE_URL', 'https://api.meta.ai')
+ASR_MODEL = os.environ.get('ASR_MODEL', 'muse-voice-transcribe-1.0')
+VOICE_MAX_BYTES = int(os.environ.get('VOICE_MAX_BYTES', str(8 * 1024 * 1024)))
+VOICE_TIMEOUT = int(os.environ.get('VOICE_TIMEOUT', '60'))
 
 # Baseten model inference (OpenAI-compatible endpoint). The model id is
 # verified against the project account; change it via the environment.
