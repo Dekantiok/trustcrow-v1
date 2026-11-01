@@ -43,8 +43,14 @@ final summary instead of asking about them.
 - Only ask for what cannot be guessed: usually just their own email \
 address, plus the amount or the other party's email if truly absent. One \
 missing thing per message, most important first.
-- When the draft is complete, show the exact terms briefly and ask for \
-confirmation before calling request_escrow_creation.
+- When the draft is complete, FIRST call request_escrow_creation right \
+away — the backend holds it and tells you to present the exact terms. \
+THEN show the terms briefly and ask for confirmation. Never show terms \
+and ask for confirmation WITHOUT calling the tool in the same turn — \
+otherwise the user is asked to confirm twice.
+- After the user confirms, call the SAME tool again with IDENTICAL \
+arguments (copy them exactly, e.g. draft_id stays a number). Do not \
+re-check, re-read, or re-validate first — just make the identical call.
 
 Rules you must follow:
 - Explain what you are about to do BEFORE doing anything consequential, \
@@ -86,13 +92,31 @@ def get_or_create_conversation(channel, channel_identity):
     return conversation
 
 
+def _normalize_arguments(arguments):
+    """Coerce model-generated args to canonical form before comparing.
+
+    The model sometimes re-emits an id as a string ("2" vs 2) on its
+    confirmation retry. Without this, the retry never matches the
+    proposal and the user is asked to confirm forever.
+    """
+    normalized = {}
+    for key, value in (arguments or {}).items():
+        if key == 'draft_id':
+            try:
+                value = int(value)
+            except (TypeError, ValueError):
+                pass
+        normalized[key] = value
+    return normalized
+
+
 def _proposal_matches(pending, name, arguments):
     if not pending or pending.get('tool') != name:
         return False
     try:
-        return json.dumps(pending.get('arguments') or {}, sort_keys=True) == (
-            json.dumps(arguments or {}, sort_keys=True)
-        )
+        return json.dumps(_normalize_arguments(pending.get('arguments')),
+                          sort_keys=True) == json.dumps(
+                              _normalize_arguments(arguments), sort_keys=True)
     except (TypeError, ValueError):
         return False
 
@@ -110,6 +134,27 @@ def _proposal_fresh(pending):
         moment = timezone.make_aware(moment)
     age = (timezone.now() - moment).total_seconds()
     return 0 <= age < CONFIRMATION_TTL_SECONDS
+
+
+def _confirmation_reminder(pending):
+    """Tell the model the exact awaiting proposal so it can echo it.
+
+    Tool calls are hidden from history (never replayed), so without this
+    the model cannot know which arguments it proposed — it rebuilds the
+    draft and the confirmation never matches. The reminder carries only
+    backend-stored proposal data (tool + args, no OTPs); execution still
+    requires the user's confirmation and full backend validation.
+    """
+    return (
+        "Reminder: you already proposed "
+        f"{pending.get('tool')} with arguments "
+        f"{json.dumps(pending.get('arguments') or {}, sort_keys=True)} "
+        "and the user was asked to confirm. If their latest message "
+        "confirms it, call that tool NOW with IDENTICAL arguments — do "
+        "not create another draft, re-read, or re-validate first. If "
+        "they changed the terms or declined, handle the change instead "
+        "(a new proposal replaces this one)."
+    )
 
 
 def propose_action(conversation, name, arguments):
@@ -159,6 +204,16 @@ def run_turn(conversation, user_text, base_url='', session_key=''):
         [{'role': 'system', 'content': SYSTEM_PROMPT}]
         + _history_messages(conversation)
     )
+    pending = conversation.pending_action or {}
+    if pending.get('tool'):
+        if _proposal_fresh(pending):
+            model_messages.append(
+                {'role': 'system',
+                 'content': _confirmation_reminder(pending)})
+        else:
+            # Stale proposal: drop it so the model starts clean instead
+            # of echoing dead arguments into another gated round-trip.
+            clear_proposal(conversation)
     max_iterations = getattr(settings, 'AGENT_MAX_ITERATIONS', 8)
 
     try:

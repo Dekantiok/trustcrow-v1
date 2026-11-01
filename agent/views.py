@@ -65,6 +65,15 @@ def _thread_context(conversation, request):
     }
 
 
+def _is_discard_command(text):
+    """A typed 'discard it' drops the awaiting proposal — no model needed."""
+    import re
+    return bool(re.match(
+        r'^\s*(discard( (it|that|this))?|disregard( (it|that|this))?|'
+        r'forget it|never mind)\s*[.!]*\s*$',
+        (text or '').strip(), re.IGNORECASE))
+
+
 def chat_page(request):
     conversation = _conversation(request)
     context = _thread_context(conversation, request)
@@ -238,6 +247,18 @@ def chat_send(request):
     conversation = _conversation(request)
     text = (request.POST.get('message') or '').strip()
     if not text:
+        return render(
+            request, 'agent/_thread.html',
+            _thread_context(conversation, request),
+        )
+
+    if _is_discard_command(text) and (conversation.pending_action or {}).get('tool'):
+        clear_proposal(conversation)
+        conversation.messages.create(role='user', content=text)
+        conversation.messages.create(
+            role='assistant',
+            content="Discarded — nothing was done. Tell me what you would like instead.",
+        )
         return render(
             request, 'agent/_thread.html',
             _thread_context(conversation, request),

@@ -31,18 +31,8 @@
     a 6-digit code is on its way to <strong>{{ pending.verification_email }}</strong>.
     Paste it here in chat and creation completes automatically.
     {% else %}
-    <strong>Awaiting your confirmation:</strong>
-    <span class="mono-text">{{ pending.tool }}</span>
+    <strong>Your call:</strong>
+    reply <em>yes</em> in chat to go ahead, or <em>discard</em> to drop it — nothing moves until you say so.
     {% endif %}
-    <div class="d-flex gap-2 mt-2">
-        {% if not pending.verification_email %}
-        <button type="button" class="btn btn-sm btn-success"
-                onclick="confirmPending();">Confirm</button>
-        {% endif %}
-        <button type="button" class="btn btn-sm btn-outline-dark-custom"
-                hx-post="{% url 'agent:chat_dismiss' %}"
-                hx-target="#chat-result"
-                hx-swap="innerHTML">Dismiss</button>
-    </div>
 </div>
 {% endif %}

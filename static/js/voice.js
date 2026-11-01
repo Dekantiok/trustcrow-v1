@@ -190,5 +190,8 @@
     initChatMic: initChatMic,
   };
 
-  document.addEventListener('DOMContentLoaded', initFieldMics);
+  document.addEventListener('DOMContentLoaded', function () {
+    initFieldMics();
+    initChatMic();
+  });
 })();

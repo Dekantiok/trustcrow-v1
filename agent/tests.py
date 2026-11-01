@@ -250,6 +250,16 @@ class LoopTest(TestCase):
         convo.refresh_from_db()
         self.assertFalse(confirmed(convo, call['name'], call['arguments']))
 
+    def test_draft_id_string_matches_int_proposal(self):
+        from agent.loop import confirmed, propose_action
+        convo = self.make_conversation(owner='buyer@example.com')
+        propose_action(convo, 'request_escrow_creation', {'draft_id': 7})
+        convo.refresh_from_db()
+        # The model sometimes re-emits the id as a string on its retry —
+        # that must still count as the same confirmed proposal.
+        self.assertTrue(confirmed(
+            convo, 'request_escrow_creation', {'draft_id': '7'}))
+
     def test_changed_terms_need_fresh_confirmation(self):
         from agent.loop import confirmed
         convo = self.make_conversation(owner='buyer@example.com')
@@ -362,3 +372,24 @@ class ChatViewTest(TestCase):
         self.assertEqual(response.status_code, 200)
         convo.refresh_from_db()
         self.assertEqual(convo.pending_action, {})
+
+    def test_typed_discard_drops_proposal_without_model(self):
+        from agent.loop import get_or_create_conversation, propose_action
+        self.client.get('/assistant/')
+        from agent.models import AIConversation
+        convo = AIConversation.objects.get(channel='web')
+        propose_action(convo, 'request_dispute_submission', {'escrow_reference': 'X'})
+        with patch('agent.views.run_turn') as mock_turn:
+            response = self.client.post('/assistant/send/', {'message': 'discard it'})
+            mock_turn.assert_not_called()
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'Discarded')
+        convo.refresh_from_db()
+        self.assertEqual(convo.pending_action, {})
+
+    def test_discard_without_pending_goes_to_model(self):
+        self.client.get('/assistant/')
+        with patch('agent.views.run_turn', return_value='ok') as mock_turn:
+            response = self.client.post('/assistant/send/', {'message': 'discard it'})
+            mock_turn.assert_called_once()
+        self.assertEqual(response.status_code, 200)

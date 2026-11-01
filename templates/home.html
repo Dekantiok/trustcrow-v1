@@ -69,14 +69,6 @@
             if (input) { input.value = ''; input.focus(); }
         }
     });
-    window.confirmPending = function () {
-        var input = document.getElementById('chat-input');
-        var form = document.getElementById('chat-form');
-        if (!input || !form) return;
-        input.value = 'Yes, I confirm.';
-        if (form.requestSubmit) form.requestSubmit();
-        else htmx.trigger(form, 'submit');
-    };
     scrollThread();
     if (window.TrustcrowVoice) TrustcrowVoice.initChatMic();
 })();
