@@ -12,6 +12,7 @@ from django.views.decorators.http import require_POST
 from .bank_verification import get_bank_name, list_banks, verify_bank_account
 from .forms import ContractCreationForm, SettlementVaultForm
 from .gateways import get_payment_gateway
+from .lifecycle import notify_event
 from .models import EscrowContract, TransitionError, WebhookEvent
 from .services import (
     calculate_service_fee,
@@ -241,11 +242,15 @@ def counterparty_verify_otp(request, code):
     contract = get_object_or_404(EscrowContract, code=code)
     error_message = None
     if request.method == 'POST':
+        was = contract.status
         redirect_response, error_message = _verify_and_advance(
             request, contract, 'join', 'awaiting_funding',
             contract.counterparty_email,
         )
         if redirect_response is not None:
+            contract.refresh_from_db()
+            if was != 'awaiting_funding' and contract.status == 'awaiting_funding':
+                notify_event('counterparty_joined', contract)
             return redirect_response
     return render(
         request, 'escrow/counterparty_verify_otp.html',
@@ -509,6 +514,8 @@ def seller_confirm_dispatch(request, code):
         contract.transition_to('in_transit', seller_confirmed=True)
     except TransitionError:
         pass
+    else:
+        notify_event('dispatch_confirmed', contract)
     return redirect('contract_detail', code=contract.code)
 
 
@@ -523,6 +530,8 @@ def buyer_confirm_receipt(request, code):
         contract.transition_to('in_inspection', inspection_ends=inspection_ends)
     except TransitionError:
         pass
+    else:
+        notify_event('receipt_confirmed', contract)
     return redirect('contract_detail', code=contract.code)
 
 
@@ -551,6 +560,8 @@ def buyer_raise_dispute(request, code):
         contract.transition_to('disputed')
     except TransitionError:
         pass
+    else:
+        notify_event('disputed', contract)
     messages.info(
         request,
         "The dispute has been raised. Funds are held until our team reviews the escrow.",
@@ -568,6 +579,8 @@ def seller_raise_dispute(request, code):
         contract.transition_to('disputed')
     except TransitionError:
         pass
+    else:
+        notify_event('disputed', contract)
     messages.info(
         request,
         "The dispute has been raised. Funds are held until our team reviews the escrow.",

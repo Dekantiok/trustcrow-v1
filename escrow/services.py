@@ -7,6 +7,7 @@ from django.db.models import Q
 from django.utils.timezone import now
 
 from .gateways import get_payment_gateway
+from .lifecycle import notify_event
 from .models import (
     AuditEvent,
     AuthOTP,
@@ -280,6 +281,7 @@ def confirm_funding_payment(contract, amount_kobo, currency=None):
             'amount_kobo': paid_kobo,
             'reference': contract.gateway_reference,
         })
+        notify_event('funding_confirmed', contract)
     return bool(moved)
 
 
@@ -345,6 +347,7 @@ def settle_pending_payout(contract):
     logger.info("Payout complete for contract %s", contract.code)
     record = record_payout('success')
     audit('payout.completed', escrow=contract, metadata={'payout_id': record.id})
+    notify_event('payout_completed', contract)
     return PayoutResult(success=True)
 
 

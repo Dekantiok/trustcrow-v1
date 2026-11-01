@@ -43,6 +43,14 @@ final summary instead of asking about them.
 - Only ask for what cannot be guessed: usually just their own email \
 address, plus the amount or the other party's email if truly absent. One \
 missing thing per message, most important first.
+- Guide the whole deal end to end: after creation say what happens \
+next (counterparty verifies, then the buyer funds); when the \
+counterparty has joined, offer the buyer the payment link without \
+waiting to be asked; after funding nudge the seller to dispatch; \
+after dispatch nudge the buyer to confirm receipt; in inspection \
+offer release or dispute; after release confirm the payout.
+- When asked for status or "what's next", check \
+get_authorized_escrow_status first — never answer from memory.
 - When the draft is complete, FIRST call request_escrow_creation right \
 away — the backend holds it and tells you to present the exact terms. \
 THEN show the terms briefly and ask for confirmation. Never show terms \
@@ -142,6 +150,44 @@ def _proposal_fresh(pending):
     return 0 <= age < CONFIRMATION_TTL_SECONDS
 
 
+UPDATE_ACTIONS = {
+    'escrow.created': 'created',
+    'escrow.created_via_agent': 'created',
+    'escrow.created_via_whatsapp': 'created',
+    'funding.confirmed': 'funded',
+    'delivery.dispatch_confirmed': 'dispatched',
+    'delivery.receipt_confirmed': 'receipt confirmed, inspection running',
+    'payout.completed': 'paid out',
+    'dispute.submitted': 'disputed — frozen',
+}
+
+
+def _recent_updates_note(actor_email):
+    """One-line brief of lifecycle moves since the user's last visit.
+
+    Lets the agent open with what changed ("funded while you were away")
+    instead of waiting to be asked. Read-only over the audit trail.
+    """
+    if not actor_email:
+        return ''
+    from datetime import timedelta
+    from django.db.models import Q
+    from escrow.models import AuditEvent
+    cutoff = timezone.now() - timedelta(hours=48)
+    rows = (AuditEvent.objects
+            .filter(action__in=list(UPDATE_ACTIONS), created_at__gt=cutoff,
+                    escrow__isnull=False)
+            .filter(Q(escrow__creator_email=actor_email)
+                    | Q(escrow__counterparty_email=actor_email))
+            .select_related('escrow').order_by('-id')[:3])
+    bits = [f"{row.escrow.code} {UPDATE_ACTIONS.get(row.action, row.action)}"
+            for row in rows if row.escrow is not None]
+    if not bits:
+        return ''
+    return ("Since your last visit: " + "; ".join(bits) + ". "
+            "Mention what changed and offer the next step.")
+
+
 def _confirmation_reminder(pending):
     """Tell the model the exact awaiting proposal so it can echo it.
 
@@ -239,6 +285,9 @@ def run_turn(conversation, user_text, base_url='', session_key=''):
             # Stale proposal: drop it so the model starts clean instead
             # of echoing dead arguments into another gated round-trip.
             clear_proposal(conversation)
+    updates_note = _recent_updates_note(actor)
+    if updates_note:
+        model_messages.append({'role': 'system', 'content': updates_note})
     max_iterations = getattr(settings, 'AGENT_MAX_ITERATIONS', 8)
 
     try:

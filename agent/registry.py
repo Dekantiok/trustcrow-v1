@@ -1,4 +1,4 @@
-"""The agent's only door into the platform: 12 approved tools.
+"""The agent's only door into the platform: 13 approved tools.
 
 Every handler receives the verified actor from the server-side session —
 never from model arguments. Anything the model sends is treated as
@@ -13,11 +13,13 @@ from django.urls import reverse
 from escrow.forms import ContractCreationForm, MAX_ESCROW_AMOUNT, MIN_ESCROW_AMOUNT
 from escrow.gateways import get_payment_gateway
 from escrow.models import EscrowContract, EscrowDraft
+from escrow.lifecycle import notify_event
 from escrow.services import (
     audit,
     calculate_service_fee,
     create_escrow_from_validated,
     issue_otp,
+    release_escrow_funds,
 )
 
 logger = logging.getLogger(__name__)
@@ -29,6 +31,7 @@ CONSEQUENTIAL_TOOLS = {
     'request_counterparty_invitation',
     'request_payment_link',
     'request_delivery_confirmation',
+    'request_release_approval',
     'request_dispute_submission',
 }
 
@@ -370,7 +373,30 @@ def tool_request_delivery_confirmation(actor, **kwargs):
            else {'buyer_confirmed': True}),
     )
     audit(f'delivery.{stage}_confirmed', actor=actor, escrow=contract)
+    notify_event('dispatch_confirmed' if stage == 'dispatch' else 'receipt_confirmed',
+                 contract)
     return {'ok': True, 'data': {'reference': contract.code, 'status': contract.status}}
+
+
+def tool_request_release_approval(actor, **kwargs):
+    actor = _require_actor(actor)
+    contract = _get_participant_contract(kwargs.get('escrow_reference'), actor)
+    if actor != contract.buyer_email:
+        raise ToolError("Only the verified buyer can release these funds.")
+    if contract.status != 'in_inspection':
+        raise ToolError(
+            f"This escrow cannot be released from status {contract.status}."
+        )
+    result = release_escrow_funds(contract)
+    if not result.success:
+        raise ToolError(result.message)
+    audit('release.approved', actor=actor, escrow=contract)
+    contract.refresh_from_db()
+    return {'ok': True, 'data': {
+        'reference': contract.code,
+        'status': contract.status,
+        'note': 'The seller has been paid.',
+    }}
 
 
 def tool_request_dispute_submission(actor, **kwargs):
@@ -384,6 +410,7 @@ def tool_request_dispute_submission(actor, **kwargs):
     contract.transition_to('disputed')
     audit('dispute.submitted', actor=actor, escrow=contract,
           metadata={'reason': reason[:500]})
+    notify_event('disputed', contract)
     return {'ok': True, 'data': {
         'reference': contract.code,
         'status': contract.status,
@@ -403,6 +430,7 @@ HANDLERS = {
     'request_counterparty_invitation': tool_request_counterparty_invitation,
     'request_payment_link': tool_request_payment_link,
     'request_delivery_confirmation': tool_request_delivery_confirmation,
+    'request_release_approval': tool_request_release_approval,
     'request_dispute_submission': tool_request_dispute_submission,
 }
 
@@ -507,6 +535,11 @@ TOOLS = [
             {'escrow_reference': _str('The escrow code.'),
              'stage': _str("'dispatch' or 'receipt'.")},
             ['escrow_reference', 'stage']),
+    _schema('request_release_approval',
+            'Release funds to the seller after inspection. Only the buyer, '
+            'only in inspection, only after explicit confirmation.',
+            {'escrow_reference': _str('The escrow code.')},
+            ['escrow_reference']),
     _schema('request_dispute_submission',
             'Raise a dispute, freezing release until resolution. Only call '
             'after the user explicitly confirmed.',
