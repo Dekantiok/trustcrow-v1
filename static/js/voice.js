@@ -1,7 +1,5 @@
-/* Shared voice-note helper: record with MediaRecorder, POST the blob,
-   hand the transcript to a callback. Used by the AI chat and manual forms.
-   No audio ever leaves the device except to our own transcription endpoint.
-*/
+/* Record with MediaRecorder, POST the blob, hand the transcript back.
+   Audio only ever goes to our own transcription endpoint. */
 (function () {
   'use strict';
 

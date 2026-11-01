@@ -4,11 +4,9 @@ from django.db import models
 class AIConversation(models.Model):
     """One ongoing agent session on a channel.
 
-    Ownership binds to a verified email only after the user completes OTP
-    verification; until then the conversation is anonymous and the agent
-    must not touch escrow records. ``channel_identity`` is the channel's
-    own session marker (Django session key for web, sender id for
-    WhatsApp) — never proof of identity by itself.
+    Ownership binds to a verified email after OTP proof; until then the
+    agent must not touch escrow records. ``channel_identity`` is a session
+    marker, never proof of identity.
     """
 
     CHANNEL_CHOICES = [
@@ -35,8 +33,7 @@ class AIConversation(models.Model):
 
 
 class ConversationMessage(models.Model):
-    """A single persisted turn. Tool calls and results are stored as their
-    own rows so history can be replayed without re-executing anything."""
+    """One persisted turn; tool traffic stored separately for replay."""
 
     ROLE_CHOICES = [
         ('user', 'User'),

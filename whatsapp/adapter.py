@@ -1,7 +1,6 @@
 """WhatsApp Cloud API adapter.
 
-Owns everything provider-shaped: signature validation, inbound payload
-normalisation, outbound delivery. No escrow business logic lives here —
+Provider-shaped code only: signatures, payload parsing, delivery. No escrow logic here —
 the views hand normalised messages to ``flow.py``, which drives the shared
 agent loop and backend tools.
 """

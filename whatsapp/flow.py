@@ -1,13 +1,9 @@
 """WhatsApp conversation workflow over the shared agent loop.
 
-Channel rules (spec sections 4.2, 8.3):
-- The sender number is an endpoint, never identity. Every escrow tool call
-  uses the backend-verified ``verified_email`` as actor — never the wa_id.
-- Email OTP: user sends their address, backend issues a code via Termii,
-  user replies with the code, backend validates, link is bound.
-- A bare 6-digit reply while a creation OTP is pending resumes escrow
-  creation (same semantics as the website chat). Plaintext codes are never
-  stored or forwarded to the model.
+The sender number is an endpoint, never identity: every escrow tool
+call uses the backend-verified email as actor. Email OTP binds number
+to identity; a bare 6-digit reply while creation is parked resumes it.
+Plaintext codes are never stored or sent to the model.
 """
 import logging
 

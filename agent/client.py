@@ -1,7 +1,6 @@
 """Baseten model inference over its OpenAI-compatible endpoint.
 
-The agent never talks to the model directly — everything goes through
-``chat()`` here, which enforces timeouts, parses tool calls into plain
+All model access goes through ``chat()``, which enforces timeouts, parses tool calls into plain
 data, and logs token usage without ever logging keys or message content.
 """
 import json

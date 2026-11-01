@@ -1,4 +1,4 @@
-"""The bounded agent loop: model proposes, backend disposes.
+"""Bounded agent loop: the model proposes, the backend disposes.
 
 One turn: persist the user message, ask the model, execute any approved
 tool calls against the registry (never trusting model arguments), feed

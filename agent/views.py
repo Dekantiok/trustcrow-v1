@@ -1,10 +1,8 @@
 """Website AI assistant: chat UI over the shared agent loop.
 
-No upfront verification — anyone can start talking immediately. When the
-user confirms a draft, the creation tool sends a code to the creator email;
-pasting that 6-digit code as the next chat message resumes creation. A bare
-6-digit message while a verification is pending is routed to OTP
-consumption — never to the model.
+No upfront verification — anyone can start talking. Confirming a draft
+sends a code to the creator email; pasting it back resumes creation.
+Bare 6-digit messages go to OTP consumption, never to the model.
 """
 import logging
 

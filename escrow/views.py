@@ -101,8 +101,7 @@ def get_contract_verified_email(request, contract):
 
 
 def get_verified_emails(request):
-    # Legacy accessor kept for backwards compatibility; new code should
-    # use get_contract_verified_email() which is scoped per contract.
+    # Legacy accessor; new code uses the contract-scoped variant.
     return [normalize_email(e) for e in request.session.get('verified_emails', [])]
 
 
@@ -120,9 +119,7 @@ def set_contract_verified_email(request, code, email):
 
 
 def add_verified_email(request, email):
-    # Legacy helper: bind the email to every contract it belongs to is
-    # unsafe (one device becomes both parties), so this is a no-op kept
-    # only so old imports keep working. Use set_contract_verified_email.
+    # Unsafe no-op kept for old imports; use set_contract_verified_email.
     return None
 
 

@@ -306,11 +306,7 @@ class VerifiedContact(models.Model):
 
 
 class PaymentTransaction(models.Model):
-    """One provider-side payment attempt for an escrow.
-
-    The authoritative record of money in. Exactly one row per provider
-    reference; verification outcomes update it in place.
-    """
+    """One provider-side payment attempt; exactly one row per reference."""
 
     STATUS_CHOICES = [
         ('pending', 'Pending'),
@@ -335,8 +331,7 @@ class PaymentTransaction(models.Model):
 
 
 class PayoutRecord(models.Model):
-    """One seller-payout attempt. A new row per attempt so retries and
-    reconciliation have a full history; the latest row is current state."""
+    """One seller-payout attempt; latest row is current state."""
 
     STATUS_CHOICES = [
         ('initiated', 'Initiated'),
@@ -365,9 +360,7 @@ class PayoutRecord(models.Model):
 
 
 class RefundRecord(models.Model):
-    """One buyer-refund operation. Refunds are explicit records executed
-    through the provider — a cancelled escrow is not a refund until the
-    provider confirms it."""
+    """One buyer-refund operation; not a refund until the provider confirms."""
 
     STATUS_CHOICES = [
         ('requested', 'Requested'),
@@ -396,8 +389,7 @@ class RefundRecord(models.Model):
 
 
 class WebhookEvent(models.Model):
-    """Every inbound provider event, recorded before processing so replays
-    and duplicates are detectable and safely ignorable."""
+    """Inbound provider events, recorded before processing (dedup)."""
 
     provider = models.CharField(max_length=20, db_index=True)
     event = models.CharField(max_length=100)
@@ -422,8 +414,7 @@ class WebhookEvent(models.Model):
 
 
 class AuditEvent(models.Model):
-    """Append-only trail of consequential authentication, authorization,
-    and financial events. Complements (never replaces) application logs."""
+    """Append-only trail of auth and financial events."""
 
     created_at = models.DateTimeField(auto_now_add=True, db_index=True)
     actor = models.CharField(max_length=255, default='system')

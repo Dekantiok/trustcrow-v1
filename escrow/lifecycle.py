@@ -1,12 +1,8 @@
 """Lifecycle notifications: tell each party what just happened.
 
-Hooks sit beside the state transitions (join, funding, dispatch, receipt,
-payout, dispute) in views, services, and agent tools. Delivery is
-best-effort WhatsApp push to the verified sender behind an email address;
-anything unconfigured or failing degrades silently and never breaks the
-underlying money move. The agent also picks up the same events from the
-audit trail on the user's next turn, so webchat users hear about updates
-conversationally and dashboard users see them live.
+Hooks sit beside the state transitions in views, services, and agent
+tools. Best-effort WhatsApp push to the verified sender; anything
+unconfigured or failing degrades silently and never breaks the money move.
 """
 import logging
 

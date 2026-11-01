@@ -1,14 +1,9 @@
 """Counterparty invitation emails.
 
-Sent once when an escrow first reaches ``awaiting_counterparty`` — from the
-manual verify page, the website AI chat, or WhatsApp alike. The email
-carries the escrow code plus a join link prefilled with it; the
-counterparty still proves their own email with an OTP before seeing
-anything, so the code alone grants nothing.
-
-Best-effort by design: SMTP failure logs and returns False, never breaking
-the verification that triggered it. Re-entry is guarded by the audit trail:
-one 'invitation.sent' per escrow, no reminder spam.
+Sent once when an escrow first reaches awaiting_counterparty, from any
+interface. Carries the code plus a prefilled join link; the counterparty
+still proves their inbox by OTP, so the code alone grants nothing.
+Best-effort: mail failure never breaks verification; one send per escrow.
 """
 import logging
 

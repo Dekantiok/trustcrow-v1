@@ -2,8 +2,7 @@
 
 Every handler receives the verified actor from the server-side session —
 never from model arguments. Anything the model sends is treated as
-untrusted input: validated, re-checked against escrow participation, and
-subject to the same state machine as the manual forms.
+untrusted input, re-validated against the same state machine as the manual forms.
 """
 import logging
 from decimal import Decimal, InvalidOperation

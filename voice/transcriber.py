@@ -1,7 +1,6 @@
 """Muse Voice Transcribe client over the Meta Model API.
 
-Pipeline: arbitrary audio bytes (browser webm/opus, WhatsApp ogg/opus) are
-converted to mono 16-bit PCM WAV at 24 kHz with the pip-bundled ffmpeg
+Pipeline: arbitrary audio (webm/opus, ogg/opus) is converted to mono 16-bit PCM WAV at 24 kHz with the pip-bundled ffmpeg
 binary (imageio-ffmpeg — no apt needed), then sent to
 ``POST {ASR_BASE_URL}/v1/asr/transcribe`` in PUSH_TO_TALK mode.
 

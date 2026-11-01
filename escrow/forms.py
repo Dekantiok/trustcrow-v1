@@ -27,8 +27,6 @@ class ContractCreationForm(forms.ModelForm):
         self.fields['amount'].max_value = MAX_ESCROW_AMOUNT
         self.fields['inspection_days'].min_value = MIN_INSPECTION_DAYS
         self.fields['inspection_days'].max_value = MAX_INSPECTION_DAYS
-        # Bootstrap styling for every field (Django renders plain widgets by
-        # default, which would appear unstyled on the create page).
         for name, field in self.fields.items():
             widget = field.widget
             if isinstance(widget, forms.Select):
@@ -90,11 +88,8 @@ class ContractCreationForm(forms.ModelForm):
 
 
 class SettlementVaultForm(forms.ModelForm):
-    # Bank + account number only. bank_name / account_name are never trusted
-    # from the client — seller_add_vault fills them from Paystack's
-    # bank/resolve response before saving, so a payee name can't be spoofed.
-    # bank_code stays as data (Paystack resolve requires it) but is rendered
-    # as a dropdown, not a free-text code field.
+    # bank_name / account_name are filled from Paystack resolve, never trusted
+    # from the client, so a payee name can't be spoofed.
     bank_code = forms.ChoiceField(
         label="Bank",
         widget=forms.Select(attrs={'class': 'form-select'}),

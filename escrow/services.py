@@ -80,8 +80,7 @@ def get_unique_contract_code(length=9, attempts=5):
 def create_escrow_from_validated(cleaned_data):
     """Create an escrow from validated creation data.
 
-    Single shared path for the manual form and the agent: code, fee,
-    status, and gateway reference are assigned here, never by callers.
+    Single shared path for manual form and agent.
     """
     contract = EscrowContract(
         title=cleaned_data['title'],
@@ -104,11 +103,7 @@ def create_escrow_from_validated(cleaned_data):
 
 def issue_otp(email, intent):
     """
-    Create and deliver a one-time code.
-
-    Any previously issued code for the same (email, intent) is burned first, so
-    exactly one code is ever live and .get() can never match multiple rows. A
-    cooldown also stops a contract code being used to spam an inbox.
+    Create and deliver a one-time code; exactly one live per (email, intent).
     """
     email = normalize_email(email)
     cooldown = getattr(settings, 'OTP_ISSUE_COOLDOWN_SECONDS', 60)
@@ -165,11 +160,7 @@ class OtpResult:
 
 def consume_otp(email, submitted_code, intent):
     """
-    Validate a submitted one-time code.
-
-    Attempts are decremented against the *live* code even when the submitted
-    value is wrong, which closes the brute-force hole where a mismatched code
-    skipped the attempt counter entirely.
+    Validate a submitted code; attempts burn even on mismatch.
     """
     email = normalize_email(email)
     submitted_code = (submitted_code or '').strip()
@@ -287,10 +278,7 @@ def confirm_funding_payment(contract, amount_kobo, currency=None):
 
 def settle_pending_payout(contract):
     """
-    Transfer funds for a contract that is already in pending_payout.
-
-    Used by staff resolving a dispute. The pending_payout -> completed move is
-    conditional, so calling this twice can never issue a second transfer.
+    Transfer funds for a contract in pending_payout (conditional, idempotent).
     """
     vault = SettlementVault.objects.filter(contract=contract).first()
     if not vault:
@@ -353,12 +341,7 @@ def settle_pending_payout(contract):
 
 def release_escrow_funds(contract):
     """
-    Move an inspected escrow to payout and transfer the seller's balance.
-
-    The in_inspection -> pending_payout move is a single conditional UPDATE, so
-    two concurrent requests cannot both claim the contract and issue two
-    transfers. The follow-on pending_payout -> completed move is guarded the
-    same way.
+    Move an inspected escrow to payout (conditional claim, single transfer).
     """
     # Read the vault through the manager rather than the cached related object,
     # so a stale in-memory instance can never claim a payout for a vault that
@@ -378,10 +361,7 @@ def release_escrow_funds(contract):
 
 def auto_release_expired_inspections(dry_run=False):
     """
-    Release escrows whose inspection window has elapsed without buyer action.
-
-    Matches on in_inspection, which is the status that actually carries an
-    inspection_ends deadline.
+    Release escrows whose inspection window elapsed without buyer action.
     """
     expired = EscrowContract.objects.filter(
         status='in_inspection', inspection_ends__lt=now()
