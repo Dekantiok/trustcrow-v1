@@ -12,6 +12,7 @@ from django.views.decorators.http import require_POST
 from .bank_verification import get_bank_name, list_banks, verify_bank_account
 from .forms import ContractCreationForm, SettlementVaultForm
 from .gateways import get_payment_gateway
+from .invitations import send_counterparty_invitation
 from .lifecycle import notify_event
 from .models import EscrowContract, TransitionError, WebhookEvent
 from .services import (
@@ -171,7 +172,10 @@ def join_escrow_page(request):
             )
         else:
             return redirect('counterparty_verify_otp', code=contract.code)
-    return render(request, 'escrow/join_escrow.html', {'error_message': error_message})
+    return render(request, 'escrow/join_escrow.html', {
+        'error_message': error_message,
+        'initial_code': request.GET.get('code', ''),
+    })
 
 
 def create_contract(request):
@@ -226,11 +230,16 @@ def verify_otp_view(request, code):
     contract = get_object_or_404(EscrowContract, code=code)
     error_message = None
     if request.method == 'POST':
+        was = contract.status
         redirect_response, error_message = _verify_and_advance(
             request, contract, 'create', 'awaiting_counterparty',
             contract.creator_email,
         )
         if redirect_response is not None:
+            contract.refresh_from_db()
+            if was != 'awaiting_counterparty' and contract.status == 'awaiting_counterparty':
+                send_counterparty_invitation(
+                    contract, base_url=request.build_absolute_uri('/')[:-1])
             return redirect_response
     return render(
         request, 'escrow/verify_otp.html',

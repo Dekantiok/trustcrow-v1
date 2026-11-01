@@ -22,6 +22,7 @@ from agent.loop import (
     run_turn,
 )
 from escrow.forms import ContractCreationForm
+from escrow.invitations import send_counterparty_invitation
 from escrow.models import EscrowDraft, TransitionError
 from escrow.services import (
     audit,
@@ -239,6 +240,9 @@ def _try_resume_creation_with_code(request, conversation, text):
         contract.transition_to('awaiting_counterparty')
     except TransitionError:
         logger.warning("Created %s but could not advance it", contract.code)
+    else:
+        send_counterparty_invitation(
+            contract, base_url=request.build_absolute_uri('/')[:-1])
     conversation.owner_email = email
     conversation.pending_action = {}
     conversation.save(update_fields=['owner_email', 'pending_action'])

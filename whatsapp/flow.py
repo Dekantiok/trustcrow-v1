@@ -17,6 +17,7 @@ from agent.loop import (
     run_turn,
 )
 from escrow.forms import ContractCreationForm
+from escrow.invitations import send_counterparty_invitation
 from escrow.models import EscrowDraft, TransitionError
 from escrow.services import audit, consume_otp, create_escrow_from_validated, issue_otp
 from escrow.utils import normalize_email
@@ -87,7 +88,7 @@ def _pending_creation(conversation):
     return None, None
 
 
-def _try_resume_creation(conversation, link, wa_id, code):
+def _try_resume_creation(conversation, link, wa_id, code, base_url=''):
     """Finish a parked escrow creation when the creation OTP arrives."""
     email, draft_id = _pending_creation(conversation)
     if not email:
@@ -135,6 +136,8 @@ def _try_resume_creation(conversation, link, wa_id, code):
         contract.transition_to('awaiting_counterparty')
     except TransitionError:
         logger.warning("Created %s but could not advance it", contract.code)
+    else:
+        send_counterparty_invitation(contract, base_url=base_url)
     conversation.owner_email = email
     conversation.pending_action = {}
     conversation.save(update_fields=['owner_email', 'pending_action'])
@@ -163,7 +166,8 @@ def handle_text_message(wa_id, text, base_url=''):
 
     # 1. Bare 6-digit code: creation OTP first, then general verification.
     if OTP_MESSAGE_RE.match(text):
-        resumed = _try_resume_creation(conversation, link, wa_id, text.strip())
+        resumed = _try_resume_creation(conversation, link, wa_id, text.strip(),
+                                         base_url=base_url)
         if resumed is not None:
             adapter.send_text_message(wa_id, resumed)
             return resumed
