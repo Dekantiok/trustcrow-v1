@@ -18,6 +18,7 @@ from agent.loop import (
     _proposal_fresh,
     clear_proposal,
     get_or_create_conversation,
+    reset_thread_unless_live,
     run_turn,
 )
 from escrow.forms import ContractCreationForm
@@ -83,6 +84,7 @@ def _is_discard_command(text):
 
 def chat_page(request):
     conversation = _conversation(request)
+    reset_thread_unless_live(conversation)
     context = _thread_context(conversation, request)
     return render(request, 'agent/chat.html', context)
 

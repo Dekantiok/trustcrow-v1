@@ -178,6 +178,25 @@ def clear_proposal(conversation):
     conversation.save(update_fields=['pending_action'])
 
 
+def reset_thread_unless_live(conversation):
+    """Clean thread for a page load unless mid-flow.
+
+    Refreshing shows an empty chat instead of stale history. A fresh
+    (unexpired) proposal — awaiting confirmation or an emailed code — is
+    left intact with its messages so an in-flight flow survives a reload.
+    Returns the live pending dict, or {}.
+    """
+    pending = conversation.pending_action or {}
+    if pending.get('tool') and not _proposal_fresh(pending):
+        clear_proposal(conversation)
+        conversation.refresh_from_db()
+        pending = {}
+    if not pending.get('tool'):
+        conversation.messages.all().delete()
+        return {}
+    return pending
+
+
 def confirmed(conversation, name, arguments):
     pending = conversation.pending_action or {}
     return _proposal_matches(pending, name, arguments) and _proposal_fresh(pending)

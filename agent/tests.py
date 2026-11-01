@@ -425,3 +425,39 @@ class ChatViewTest(TestCase):
         self.assertEqual(convo.messages.count(), 0)
         self.assertEqual(convo.pending_action, {})
         self.assertContains(response, 'What are we escrowing today?')
+
+    def test_page_load_wipes_idle_history(self):
+        self.client.get('/assistant/')
+        from agent.models import AIConversation
+        convo = AIConversation.objects.get(channel='web')
+        convo.messages.create(role='user', content='old hello')
+        convo.messages.create(role='assistant', content='old reply')
+        response = self.client.get('/assistant/')
+        self.assertEqual(response.status_code, 200)
+        self.assertNotContains(response, 'old hello')
+        self.assertContains(response, 'What are we escrowing today?')
+        convo.refresh_from_db()
+        self.assertEqual(convo.messages.count(), 0)
+
+    def test_page_load_preserves_live_flow(self):
+        from agent.loop import propose_action
+        self.client.get('/assistant/')
+        from agent.models import AIConversation
+        convo = AIConversation.objects.get(channel='web')
+        convo.messages.create(role='user', content='keep me')
+        propose_action(convo, 'request_escrow_creation', {'draft_id': 3})
+        response = self.client.get('/assistant/')
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'keep me')
+        self.assertContains(response, 'Your call:')
+        convo.refresh_from_db()
+        self.assertEqual(convo.messages.count(), 1)
+
+    def test_home_load_wipes_idle_history(self):
+        self.client.get('/assistant/')
+        from agent.models import AIConversation
+        convo = AIConversation.objects.get(channel='web')
+        convo.messages.create(role='user', content='stale home hi')
+        response = self.client.get('/')
+        self.assertEqual(response.status_code, 200)
+        self.assertNotContains(response, 'stale home hi')

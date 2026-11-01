@@ -129,7 +129,7 @@ def is_party(contract, request):
 
 
 def home_view(request):
-    from agent.loop import get_or_create_conversation
+    from agent.loop import get_or_create_conversation, reset_thread_unless_live
     if not request.session.session_key:
         request.session.save()
     conversation = get_or_create_conversation(
@@ -142,10 +142,10 @@ def home_view(request):
     elif conversation.owner_email and conversation.owner_email != verified:
         conversation.owner_email = verified or None
         conversation.save(update_fields=['owner_email'])
-    pending = conversation.pending_action or {}
+    pending = reset_thread_unless_live(conversation)
     context = {
         'messages': list(conversation.messages.order_by('id')),
-        'pending': pending if pending.get('tool') else None,
+        'pending': pending or None,
         'owner_email': conversation.owner_email,
     }
     return render(request, 'home.html', context)
