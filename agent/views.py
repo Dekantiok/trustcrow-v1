@@ -15,6 +15,7 @@ from agent.loop import (
     OTP_MESSAGE_RE,
     _proposal_fresh,
     clear_proposal,
+    find_pending_join_code,
     get_or_create_conversation,
     reset_thread_unless_live,
     run_turn,
@@ -24,6 +25,7 @@ from escrow.invitations import send_counterparty_invitation
 from escrow.models import EscrowDraft, TransitionError
 from escrow.services import (
     audit,
+    complete_counterparty_join,
     consume_otp,
     create_escrow_from_validated,
     issue_otp,
@@ -70,6 +72,35 @@ def _thread_context(conversation, request):
         'owner_email': conversation.owner_email,
         'pending_email': request.session.get('chat_pending_email', ''),
     }
+
+
+def _complete_pending_join(conversation, email):
+    """Finish a join that was waiting on this verification, if any.
+
+    Returns the assistant reply to show, or None for a plain verify.
+    The stored context is always consumed so a stale code can never
+    join a later, unrelated verification.
+    """
+    code = find_pending_join_code(conversation)
+    if conversation.pending_context:
+        conversation.pending_context = {}
+        conversation.save(update_fields=['pending_context'])
+    if not code:
+        return None
+    contract, error = complete_counterparty_join(code, email)
+    if contract is None:
+        return f"You're verified, but I couldn't join that escrow: {error}"
+    role = 'buyer' if email == contract.buyer_email else 'seller'
+    audit('counterparty.joined_via_chat', actor=email, escrow=contract)
+    if role == 'buyer':
+        return (f"Verified and joined — escrow {contract.code} "
+                f"({contract.title}, {contract.amount} {contract.currency}) "
+                "is now awaiting funding. Say \"fund\" and I'll get your "
+                "payment link.")
+    return (f"Verified and joined — escrow {contract.code} "
+            f"({contract.title}, {contract.amount} {contract.currency}) "
+            "is now awaiting funding. The creator has been notified; "
+            "I'll tell you here when it's funded so you can ship.")
 
 
 def _is_discard_command(text):
@@ -305,12 +336,20 @@ def chat_send(request):
             conversation.owner_email = agent_pending
             conversation.pending_email = None
             conversation.save(update_fields=['owner_email', 'pending_email'])
+            join_reply = _complete_pending_join(conversation, agent_pending)
+            audit('chat.verified', actor=agent_pending)
+            if join_reply:
+                conversation.messages.create(
+                    role='assistant', content=join_reply)
+                return render(
+                    request, 'agent/_thread.html',
+                    _thread_context(conversation, request),
+                )
             conversation.messages.create(
                 role='assistant',
                 content=(f"Verified — I can now help with escrows for "
                          f"{agent_pending}. What would you like to do?"),
             )
-            audit('chat.verified', actor=agent_pending)
         else:
             conversation.messages.create(
                 role='assistant', content=result.message,
@@ -433,6 +472,30 @@ def chat_voice(request):
             request, conversation, transcript.strip())
         if resumed is not None:
             return resumed
+        agent_pending = normalize_email(conversation.pending_email or '')
+        if agent_pending:
+            result = consume_otp(agent_pending, transcript.strip(), 'reauth')
+            conversation.messages.create(
+                role='user', content='[one-time code withheld]')
+            if result.ok:
+                request.session['chat_verified_email'] = agent_pending
+                conversation.owner_email = agent_pending
+                conversation.pending_email = None
+                conversation.save(update_fields=['owner_email', 'pending_email'])
+                join_reply = _complete_pending_join(conversation, agent_pending)
+                audit('chat.verified', actor=agent_pending)
+                conversation.messages.create(
+                    role='assistant',
+                    content=join_reply or (
+                        f"Verified — I can now help with escrows for "
+                        f"{agent_pending}. What would you like to do?"))
+            else:
+                conversation.messages.create(
+                    role='assistant', content=result.message)
+            return render(
+                request, 'agent/_thread.html',
+                _thread_context(conversation, request),
+            )
     base_url = request.build_absolute_uri('/')[:-1]
     session_key = request.session.session_key or ''
     run_turn(conversation, transcript, base_url=base_url, session_key=session_key)

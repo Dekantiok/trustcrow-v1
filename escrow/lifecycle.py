@@ -12,10 +12,11 @@ logger = logging.getLogger(__name__)
 def _recipients(event, contract):
     buyer, seller = contract.buyer_email, contract.seller_email
     return {
-        'counterparty_joined': [buyer],
+        'counterparty_joined': [contract.creator_email],
         'funding_confirmed': [seller],
         'dispatch_confirmed': [buyer],
         'receipt_confirmed': [buyer, seller],
+        'bank_details_needed': [seller],
         'payout_completed': [seller, buyer],
         'disputed': [buyer, seller],
     }.get(event, [])
@@ -24,8 +25,14 @@ def _recipients(event, contract):
 def _copy(event, contract):
     code = contract.code
     if event == 'counterparty_joined':
-        return ("Good news — the other party verified escrow "
-                f"{code}. Say 'fund' and I'll fetch your payment link.")
+        return (f"Update on escrow {code}: the counterparty has joined "
+                "and verified. It is now awaiting funding — the buyer "
+                "can pay next.")
+    if event == 'bank_details_needed':
+        return (f"Action needed on escrow {code}: the buyer is ready to "
+                "release funds, but your payout bank details are missing. "
+                "Tell me your bank name and 10-digit account number here "
+                "and I'll verify and save them.")
     if event == 'funding_confirmed':
         return (f"Escrow {code} is funded ({contract.total_charge} "
                 f"{contract.currency}). Please dispatch, then tell me "

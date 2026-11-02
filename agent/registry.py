@@ -1,4 +1,4 @@
-"""The agent's only door into the platform: 15 approved tools.
+"""The agent's only door into the platform: 18 approved tools.
 
 Every handler receives the verified actor from the server-side session —
 never from model arguments. Anything the model sends is treated as
@@ -11,13 +11,15 @@ from django.urls import reverse
 
 from escrow.utils import normalize_email
 
+from escrow.bank_verification import get_bank_name, list_banks, verify_bank_account
 from escrow.forms import ContractCreationForm, MAX_ESCROW_AMOUNT, MIN_ESCROW_AMOUNT
 from escrow.gateways import get_payment_gateway
-from escrow.models import EscrowContract, EscrowDraft
+from escrow.models import EscrowContract, EscrowDraft, SettlementVault
 from escrow.lifecycle import notify_event
 from escrow.services import (
     audit,
     calculate_service_fee,
+    complete_counterparty_join,
     contracts_for_email,
     create_escrow_from_validated,
     issue_otp,
@@ -31,9 +33,11 @@ CONFIRMATION_TTL_SECONDS = 15 * 60
 CONSEQUENTIAL_TOOLS = {
     'request_escrow_creation',
     'request_counterparty_invitation',
+    'request_counterparty_join',
     'request_payment_link',
     'request_delivery_confirmation',
     'request_release_approval',
+    'request_seller_bank_details',
     'request_dispute_submission',
 }
 
@@ -390,11 +394,15 @@ def tool_request_delivery_confirmation(actor, **kwargs):
         raise ToolError(
             f"This escrow cannot move to {target} from {contract.status}."
         )
-    contract.transition_to(
-        target,
-        **({'seller_confirmed': True} if stage == 'dispatch'
-           else {'buyer_confirmed': True}),
-    )
+    fields = {'seller_confirmed': True} if stage == 'dispatch' else {'buyer_confirmed': True}
+    if stage == 'receipt':
+        # Inspection starts at receipt, same as the manual form — without
+        # this deadline auto-release can never fire for chat deals.
+        import datetime
+        from django.utils import timezone as _tz
+        fields['inspection_ends'] = _tz.now() + datetime.timedelta(
+            days=contract.inspection_days)
+    contract.transition_to(target, **fields)
     audit(f'delivery.{stage}_confirmed', actor=actor, escrow=contract)
     notify_event('dispatch_confirmed' if stage == 'dispatch' else 'receipt_confirmed',
                  contract)
@@ -409,6 +417,14 @@ def tool_request_release_approval(actor, **kwargs):
     if contract.status != 'in_inspection':
         raise ToolError(
             f"This escrow cannot be released from status {contract.status}."
+        )
+    if not SettlementVault.objects.filter(contract=contract).exists():
+        notify_event('bank_details_needed', contract)
+        audit('release.blocked_no_vault', actor=actor, escrow=contract)
+        raise ToolError(
+            "The seller has not added payout bank details yet. I've "
+            "notified them to add them here in chat — release again once "
+            "they confirm the account is saved."
         )
     result = release_escrow_funds(contract)
     if not result.success:
@@ -433,12 +449,21 @@ def tool_request_verification_code(actor, **kwargs):
     if '@' not in email or '.' not in email or ' ' in email:
         raise ToolError("I need a valid email address to send the code to.")
     conversation = kwargs.get('_conversation')
+    escrow_reference = (kwargs.get('escrow_reference') or '').strip()
     if (conversation is not None and conversation.owner_email
             and conversation.owner_email == email):
         return {'ok': True, 'data': {
             'already_verified': True, 'email': email,
             'next': 'This chat is already verified for that email — carry on.',
         }}
+    if conversation is not None and escrow_reference:
+        # Remember what the code is *for*: when it comes back verified,
+        # the chat layer completes the join without another round-trip.
+        conversation.pending_context = {
+            **(conversation.pending_context or {}),
+            'join_escrow_reference': escrow_reference,
+        }
+        conversation.save(update_fields=['pending_context'])
     if issue_otp(email, 'reauth') is None:
         from django.utils import timezone as _tz
         from escrow.models import AuthOTP
@@ -465,6 +490,92 @@ def tool_request_verification_code(actor, **kwargs):
         'verification_required': True, 'email': email,
         'next': (f"A 6-digit code is on its way to {email}. "
                  "Ask the user to paste it here in chat; everything continues on verification."),
+    }}
+
+
+def tool_request_counterparty_join(actor, **kwargs):
+    actor = _require_actor(actor)
+    code = (kwargs.get('escrow_reference') or '').strip()
+    contract, error = complete_counterparty_join(code, actor)
+    if contract is None:
+        raise ToolError(error)
+    return {'ok': True, 'data': {
+        'reference': contract.code,
+        'title': contract.title,
+        'status': contract.status,
+        'amount': str(contract.amount),
+        'currency': contract.currency,
+        'you_are': 'buyer' if actor == contract.buyer_email else 'seller',
+        'next': (
+            'Joined. The creator has been notified and the buyer can now '
+            'fund this escrow.' if actor != contract.buyer_email else
+            'Joined. You are the buyer — say "fund" and I will get your '
+            'payment link after you confirm.'),
+    }}
+
+
+def tool_get_bank_list(actor, **kwargs):
+    del actor, kwargs
+    banks = list_banks()
+    return {'ok': True, 'data': {
+        'banks': [{'code': code, 'name': name}
+                  for code, name in sorted(banks.items(), key=lambda kv: kv[1])],
+    }}
+
+
+def tool_request_seller_bank_details(actor, **kwargs):
+    actor = _require_actor(actor)
+    contract = _get_participant_contract(kwargs.get('escrow_reference'), actor)
+    if actor != contract.seller_email:
+        raise ToolError("Only the verified seller can add payout bank details.")
+    if contract.status not in ('awaiting_dispatch', 'in_transit',
+                               'in_inspection', 'pending_payout'):
+        raise ToolError(
+            f"Bank details cannot be added from status {contract.status}."
+        )
+    existing = SettlementVault.objects.filter(contract=contract).first()
+    if existing:
+        return {'ok': True, 'data': {
+            'already_saved': True,
+            'bank_name': existing.bank_name,
+            'account_number': existing.masked_account_number,
+            'account_name': existing.account_name,
+            'note': 'Payout account already saved; contact support to change it.',
+        }}
+    bank_code = (kwargs.get('bank_code') or '').strip()
+    account_number = (kwargs.get('account_number') or '').strip()
+    banks = list_banks()
+    if bank_code not in banks:
+        raise ToolError(
+            "That bank is not recognised. Ask for the bank list and use "
+            "one of the codes there."
+        )
+    if not account_number.isdigit() or len(account_number) != 10:
+        raise ToolError("The account number must be exactly 10 digits.")
+    # Backend verification is authoritative — never save what was typed
+    # until Paystack resolves the account name.
+    verification = verify_bank_account(account_number, bank_code)
+    if not verification.get('status'):
+        raise ToolError(
+            "Bank verification failed: "
+            f"{verification.get('error') or 'account could not be resolved'}. "
+            "Check the bank and number and try again."
+        )
+    vault = SettlementVault.objects.create(
+        contract=contract,
+        bank_name=get_bank_name(bank_code)[:100],
+        bank_code=bank_code,
+        account_number=account_number,
+        account_name=(verification.get('account_name') or '')[:150],
+    )
+    audit('bank_details.saved', actor=actor, escrow=contract,
+          metadata={'bank_code': bank_code})
+    return {'ok': True, 'data': {
+        'reference': contract.code,
+        'bank_name': vault.bank_name,
+        'account_number': vault.masked_account_number,
+        'account_name': vault.account_name,
+        'note': 'Verified and saved. The buyer can now release funds.',
     }}
 
 
@@ -502,6 +613,9 @@ HANDLERS = {
     'request_delivery_confirmation': tool_request_delivery_confirmation,
     'request_release_approval': tool_request_release_approval,
     'request_verification_code': tool_request_verification_code,
+    'request_counterparty_join': tool_request_counterparty_join,
+    'get_bank_list': tool_get_bank_list,
+    'request_seller_bank_details': tool_request_seller_bank_details,
     'request_dispute_submission': tool_request_dispute_submission,
 }
 
@@ -624,8 +738,30 @@ TOOLS = [
             'or act on an escrow. Call as soon as they share their email. '
             'The user pastes the code here in chat — never send them '
             'anywhere else; tell them to reply with it.',
-            {'email': _str('The user’s own email address to verify.')},
+            {'email': _str('The user’s own email address to verify.'),
+             'escrow_reference': _str(
+                 'Escrow code when joining/checking a specific escrow, '
+                 'so the join completes right after verification.')},
             ['email']),
+    _schema('request_counterparty_join',
+            'Join an escrow as its verified counterparty. Moves it to '
+            'awaiting funding and notifies the creator. Only call after '
+            'the user explicitly confirmed joining on the shown terms.',
+            {'escrow_reference': _str('The escrow code.')},
+            ['escrow_reference']),
+    _schema('get_bank_list',
+            'List payout banks with codes. Use to match the bank name '
+            'the seller gives you to a code before saving details.',
+            {}, []),
+    _schema('request_seller_bank_details',
+            'Verify (via the backend resolver) and save the seller’s '
+            'payout bank account for an escrow. Only the verified '
+            'seller, only after explicit confirmation. Never invent a '
+            'bank code — match the name via get_bank_list first.',
+            {'escrow_reference': _str('The escrow code.'),
+             'bank_code': _str('Bank code from get_bank_list.'),
+             'account_number': _str('Exactly 10 digits.')},
+            ['escrow_reference', 'bank_code', 'account_number']),
     _schema('request_dispute_submission',
             'Raise a dispute, freezing release until resolution. Only call '
             'after the user explicitly confirmed.',

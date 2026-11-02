@@ -103,12 +103,37 @@
     if (row) row.remove();
   }
 
-  /* Typing bubble while a typed message waits for the agent reply. */
+  function appendUserBubble(text) {
+    var thread = document.getElementById('chat-thread');
+    if (!thread) return;
+    var old = document.getElementById('chat-optimistic');
+    if (old) old.remove();
+    var row = document.createElement('div');
+    row.className = 'd-flex justify-content-end';
+    row.id = 'chat-optimistic';
+    var bubble = document.createElement('div');
+    bubble.className = 'rounded-3 px-3 py-2 bubble-mine';
+    bubble.textContent = text;
+    row.appendChild(bubble);
+    thread.appendChild(row);
+    thread.scrollTop = thread.scrollHeight;
+  }
+
+  /* Sent message appears instantly, typing dots below it, input cleared
+     for the follow-up — the server swap then replaces the whole thread. */
   function initChatIndicators() {
     if (!window.htmx) return;
     document.body.addEventListener('htmx:beforeRequest', function (event) {
       var form = document.getElementById('chat-form');
-      if (form && event.detail && event.detail.elt === form) showTyping();
+      if (form && event.detail && event.detail.elt === form) {
+        var input = document.getElementById('chat-input');
+        var text = input ? input.value.trim() : '';
+        if (text) {
+          appendUserBubble(/^\d{6}$/.test(text) ? '[one-time code withheld]' : text);
+          if (input) input.value = '';
+        }
+        showTyping();
+      }
     });
     var hide = function (event) {
       if (event.detail && event.detail.target &&
@@ -237,6 +262,7 @@
     }
     function uploadBlob(blob) {
       stop = null;
+      appendUserBubble('🎤 Voice note');
       showTyping();
       if (hint) hint.textContent = '';
       var fd = new FormData();
@@ -317,6 +343,7 @@
     initChatIndicators: initChatIndicators,
     showTyping: showTyping,
     hideTyping: hideTyping,
+    appendUserBubble: appendUserBubble,
   };
 
   document.addEventListener('DOMContentLoaded', function () {

@@ -9,13 +9,20 @@ import logging
 
 from agent.loop import (
     OTP_MESSAGE_RE,
+    find_pending_join_code,
     get_or_create_conversation,
     run_turn,
 )
 from escrow.forms import ContractCreationForm
 from escrow.invitations import send_counterparty_invitation
 from escrow.models import EscrowDraft, TransitionError
-from escrow.services import audit, consume_otp, create_escrow_from_validated, issue_otp
+from escrow.services import (
+    audit,
+    complete_counterparty_join,
+    consume_otp,
+    create_escrow_from_validated,
+    issue_otp,
+)
 from escrow.utils import normalize_email
 
 from . import adapter
@@ -151,6 +158,26 @@ def _try_resume_creation(conversation, link, wa_id, code, base_url=''):
     return reply
 
 
+def _join_reply_after_verify(conversation, email):
+    """Complete a pending join right after WhatsApp email verification."""
+    code = find_pending_join_code(conversation)
+    if conversation.pending_context:
+        conversation.pending_context = {}
+        conversation.save(update_fields=['pending_context'])
+    if not code:
+        return None
+    contract, error = complete_counterparty_join(code, email)
+    if contract is None:
+        return f"You're verified, but I couldn't join that escrow: {error}"
+    audit('counterparty.joined_via_whatsapp', actor=email, escrow=contract)
+    if email == contract.buyer_email:
+        return (f"Verified and joined — escrow {contract.code} is now "
+                "awaiting funding. Say \"fund\" and I'll get your payment link.")
+    return (f"Verified and joined — escrow {contract.code} is now "
+            "awaiting funding. The creator has been notified; I'll "
+            "message you here when it's funded so you can ship.")
+
+
 def _looks_like_email(text):
     text = (text or '').strip()
     return '@' in text and '.' in text and ' ' not in text and len(text) <= 254
@@ -172,7 +199,8 @@ def handle_text_message(wa_id, text, base_url=''):
         if resumed is not None:
             adapter.send_text_message(wa_id, resumed)
             return resumed
-        pending_email = normalize_email(link.pending_email)
+        pending_email = normalize_email(
+            link.pending_email or conversation.pending_email or '')
         if pending_email:
             result = consume_otp(pending_email, text.strip(), 'reauth')
             conversation.messages.create(role='user', content='[one-time code withheld]')
@@ -180,13 +208,15 @@ def handle_text_message(wa_id, text, base_url=''):
                 link.verified_email = pending_email
                 link.pending_email = ''
                 link.save(update_fields=['pending_email', 'verified_email'])
+                if conversation.pending_email:
+                    conversation.pending_email = None
+                    conversation.save(update_fields=['pending_email'])
                 sync_conversation_owner(conversation, link)
-                conversation.messages.create(
-                    role='assistant',
-                    content=VERIFIED_TEMPLATE.format(email=pending_email),
-                )
                 audit('whatsapp.verified', actor=pending_email)
-                reply = VERIFIED_TEMPLATE.format(email=pending_email)
+                reply = _join_reply_after_verify(conversation, pending_email)
+                if reply is None:
+                    reply = VERIFIED_TEMPLATE.format(email=pending_email)
+                conversation.messages.create(role='assistant', content=reply)
             else:
                 conversation.messages.create(role='assistant', content=result.message)
                 reply = result.message

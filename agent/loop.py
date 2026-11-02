@@ -45,17 +45,29 @@ final summary instead of asking about them.
 - Only ask for what cannot be guessed: usually just their own email \
 address, plus the amount or the other party's email if truly absent. One \
 missing thing per message, most important first.
-- Guide the whole deal end to end: after creation say what happens \
-next (counterparty verifies, then the buyer funds); when the \
-counterparty has joined, offer the buyer the payment link without \
-waiting to be asked; after funding nudge the seller to dispatch; \
-- When the user wants to fund or pay: check the escrow with \
-get_authorized_escrow_status first (you already know their verified \
-email — never re-ask), report what you find, then call \
-request_payment_link. Never declare the counterparty joined or not \
-joined without checking.
-after dispatch nudge the buyer to confirm receipt; in inspection \
-offer release or dispute; after release confirm the payout.
+- Guide the whole deal end to end, never send anyone to a page:
+  CREATE: describe the deal, confirm terms, then the creator pastes \
+  the emailed code here and the escrow exists — give them the TRST \
+  code to share.
+  JOIN: the counterparty gives you the TRST code; get their email and \
+  call request_verification_code WITH that code (it completes the \
+  join when they paste the returned code). If already verified, check \
+  status, show the terms, and after they confirm call \
+  request_counterparty_join. Joined means the status moved — never \
+  say someone has or has not joined without checking the backend.
+  FUND: buyer only, status awaiting_funding. Check status first, then \
+  request_payment_link after confirmation and share the link. Payment \
+  is verified by the backend, never by the user's say-so.
+  SHIP/RECEIVE: seller says shipped -> confirm dispatch; buyer says \
+  received -> confirm receipt (inspection starts). Each step updates \
+  the server and notifies the other party automatically.
+  BANK: before release the seller must have payout details saved. \
+  Ask for bank name + 10-digit account number, match the name with \
+  get_bank_list, confirm the exact account, then call \
+  request_seller_bank_details — the backend verifies the name.
+  RELEASE: buyer confirms in inspection -> request_release_approval. \
+  If bank details are missing the seller is notified automatically; \
+  say so and wait. After release, confirm payout to both parties.
 - When asked for status or "what's next", check \
 list_my_escrows first when they ask what is new or what needs them, then get_authorized_escrow_status for the one they pick — never answer from memory.
 - When the draft is complete, FIRST call request_escrow_creation right \
@@ -92,6 +104,25 @@ behind them.
 
 # A message that is only a 6-digit code is an OTP being pasted, not chat.
 OTP_MESSAGE_RE = re.compile(r'^\s*\d{6}\s*$')
+ESCROW_CODE_RE = re.compile(r'TRST[A-Za-z0-9]{5}')
+
+
+def find_pending_join_code(conversation):
+    """Escrow the user meant to join, from stored context or recent chat.
+
+    Checked after email verification succeeds so the join completes in
+    the same message instead of another model round-trip.
+    """
+    context = conversation.pending_context or {}
+    code = (context.get('join_escrow_reference') or '').strip()
+    if code:
+        return code
+    rows = conversation.messages.filter(role='user').order_by('-id')[:10]
+    for row in rows:
+        match = ESCROW_CODE_RE.search(row.content or '')
+        if match:
+            return match.group(0)
+    return ''
 
 DEGRADED_REPLY = (
     "The AI assistant is temporarily unavailable, but nothing is lost — "

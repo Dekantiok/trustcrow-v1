@@ -21,6 +21,9 @@ class AIConversation(models.Model):
     # A bare 6-digit reply while this is set is consumed as the code —
     # never forwarded to the model.
     pending_email = models.EmailField(null=True, blank=True)
+    # Flow context that must survive an OTP round-trip, e.g.
+    # {'join_escrow_reference': 'TRST...'} while verification is pending.
+    pending_context = models.JSONField(default=dict, blank=True)
     # Awaiting user confirmation for one consequential tool call:
     # {'tool': name, 'arguments': {...}, 'proposed_at': iso-timestamp}.
     # Set when the agent presents a proposal, cleared on execution or

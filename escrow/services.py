@@ -394,6 +394,41 @@ def transition_or_log(contract, target, **fields):
         return None
 
 
+def complete_counterparty_join(code, actor_email):
+    """Join an escrow as its counterparty after email proof.
+
+    Returns (contract, error). On success the escrow moves to
+    awaiting_funding, the joiner's verified flag is set, the creator is
+    notified, and the move is audited. Used by the manual join form's
+    chat equivalents: agent tool, webchat OTP resume, WhatsApp OTP resume.
+    """
+    actor = normalize_email(actor_email)
+    contract = EscrowContract.objects.filter(code=(code or '').strip()).first()
+    if contract is None:
+        return None, "No escrow found with that code."
+    if actor != contract.counterparty_email:
+        return None, "That email is not the counterparty for this escrow."
+    if contract.status == 'awaiting_funding':
+        return contract, ''
+    if contract.status != 'awaiting_counterparty':
+        return None, (
+            f"This escrow is not waiting for a counterparty to join "
+            f"(status: {contract.status})."
+        )
+    fields = {}
+    if actor == contract.buyer_email:
+        fields['buyer_confirmed'] = True
+    elif actor == contract.seller_email:
+        fields['seller_confirmed'] = True
+    try:
+        contract.transition_to('awaiting_funding', **fields)
+    except TransitionError:
+        return None, "This escrow could not be joined right now."
+    audit('counterparty.joined', actor=actor, escrow=contract)
+    notify_event('counterparty_joined', contract)
+    return contract, ''
+
+
 def contracts_for_email(email, include_closed=False):
     email = normalize_email(email)
     queryset = EscrowContract.objects.filter(
