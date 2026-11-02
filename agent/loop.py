@@ -263,6 +263,147 @@ def _abandon_session_drafts(conversation):
     ).update(status='abandoned')
 
 
+def _maybe_auto_propose_creation(conversation, actor, session_key):
+    """Park a creation proposal when a complete draft is on the table.
+
+    The model sometimes presents terms in prose without calling the
+    creation tool; without a recorded proposal the user's "yes" then
+    hits the gate cold and they are asked to confirm twice. Recording
+    the proposal at end-of-turn (never mid-turn, so it cannot execute
+    in the same turn it was made) means one confirmation always lands.
+    """
+    if (conversation.pending_action or {}).get('tool'):
+        return
+    from escrow.models import EscrowDraft
+    qs = EscrowDraft.objects.filter(status__in=('draft', 'proposed'))
+    if session_key:
+        qs = qs.filter(owner_session=session_key)
+    elif actor:
+        qs = qs.filter(owner_email=actor)
+    else:
+        return
+    draft = qs.order_by('-id').first()
+    if draft is None:
+        return
+    if not (draft.title and draft.amount is not None and draft.fee_payer
+            and draft.creator_role and draft.counterparty_email
+            and (draft.owner_email or actor)):
+        return
+    propose_action(conversation, 'request_escrow_creation',
+                   {'draft_id': draft.id})
+
+
+AFFIRMATIVE_RE = re.compile(
+    r'^\s*(yes|yep|yeah|yup|confirm|confirmed|i confirm|go ahead|proceed|'
+    r'do it|ok|okay|sure|please do|yes please|yes confirm)\b',
+    re.IGNORECASE)
+_CHANGE_WORDS_RE = re.compile(
+    r'\b(but|change|changed|instead|wait|stop|cancel|different|actually|'
+    r'not now|no)\b', re.IGNORECASE)
+
+
+def _is_affirmative(text):
+    """Clear confirmation of the pending proposal, in natural phrasing.
+
+    "Yes, release them." counts; "yes but change the amount" never does —
+    any change/negation word sends the turn back to the model instead.
+    """
+    text = (text or '').strip()
+    if not AFFIRMATIVE_RE.match(text):
+        return False
+    return not _CHANGE_WORDS_RE.search(text)
+
+
+def _direct_reply(name, outcome):
+    """Deterministic reply for a directly-executed confirmed proposal."""
+    if not outcome.get('ok'):
+        return f"That didn't go through: {outcome.get('error') or 'please try again.'}"
+    data = outcome.get('data') or {}
+    if name == 'request_escrow_creation':
+        if data.get('verification_required'):
+            return (f"I've sent a 6-digit code to {data.get('email')}. "
+                    "Paste it here in chat to finish creating the escrow.")
+        return (f"Your escrow {data.get('reference')} is created. "
+                "Share the code with the other party so they can join.")
+    if name == 'request_counterparty_join':
+        return (f"Joined — escrow {data.get('reference')} is now "
+                f"{data.get('status')}. {data.get('next') or ''}").strip()
+    if name == 'request_payment_link':
+        return (f"Here's your secure payment link: {data.get('payment_url')} "
+                "— payment is verified by the backend once completed, "
+                "and the seller will be notified to ship.")
+    if name == 'request_delivery_confirmation':
+        if data.get('status') == 'in_inspection':
+            return ("Receipt confirmed — the inspection window has "
+                    "started. Say \"release\" when you're happy, or "
+                    "\"dispute\" if something is wrong.")
+        return ("Marked as dispatched — the buyer has been notified. "
+                "I'll update you when they confirm receipt.")
+    if name == 'request_release_approval':
+        return (f"Funds released — the seller has been paid. "
+                f"Escrow {data.get('reference')} is complete.")
+    if name == 'request_seller_bank_details':
+        if data.get('already_saved'):
+            return (f"Payout account already saved: {data.get('bank_name')} "
+                    f"{data.get('account_number')} ({data.get('account_name')}).")
+        return (f"Verified and saved: {data.get('bank_name')} "
+                f"{data.get('account_number')} ({data.get('account_name')}). "
+                "The buyer can now release the funds.")
+    if name == 'request_dispute_submission':
+        return ("Dispute raised — funds are frozen until it's resolved. "
+                "Our team will review the escrow.")
+    if name == 'request_counterparty_invitation':
+        return (f"Share escrow code {data.get('code')} with the other party "
+                "so they can join and verify.")
+    return "Done — that's completed."
+
+
+def _try_direct_confirmation(conversation, user_text, actor, base_url, session_key):
+    """Execute a fresh pending proposal on a clear 'yes', no model call.
+
+    The model occasionally re-presents terms in prose instead of
+    re-calling the tool, which made users confirm twice. A bare
+    affirmative reply to a recorded proposal is unambiguous, so the
+    backend executes the exact stored arguments deterministically.
+    Returns the reply string, or None to fall through to the model.
+    """
+    pending = conversation.pending_action or {}
+    name = pending.get('tool')
+    if name not in CONSEQUENTIAL_TOOLS:
+        return None
+    if not _proposal_fresh(pending):
+        return None
+    if not _is_affirmative(user_text):
+        return None
+    arguments = pending.get('arguments') or {}
+    clear_proposal(conversation)
+    ConversationMessage.objects.create(
+        conversation=conversation, role='assistant', content='',
+        tool_name=name, tool_arguments=arguments)
+    outcome = execute(name, arguments, actor_email=actor,
+                      base_url=base_url, session_key=session_key,
+                      conversation=conversation)
+    ConversationMessage.objects.create(
+        conversation=conversation, role='tool',
+        content=json.dumps(outcome), tool_name=name)
+    data = outcome.get('data') or {}
+    verification_email = data.get('verification_email') or (
+        data.get('email') if data.get('verification_required') else None)
+    if outcome.get('ok') and verification_email:
+        conversation.pending_action = {
+            'tool': name,
+            'arguments': arguments,
+            'proposed_at': timezone.now().isoformat(),
+            'verification_email': verification_email,
+            'draft_id': data.get('draft_id'),
+        }
+        conversation.save(update_fields=['pending_action'])
+    reply = _direct_reply(name, outcome)
+    ConversationMessage.objects.create(
+        conversation=conversation, role='assistant', content=reply)
+    return reply
+
+
 def confirmed(conversation, name, arguments):
     pending = conversation.pending_action or {}
     return _proposal_matches(pending, name, arguments) and _proposal_fresh(pending)
@@ -291,6 +432,10 @@ def run_turn(conversation, user_text, base_url='', session_key=''):
     ConversationMessage.objects.create(
         conversation=conversation, role='user', content=user_text,
     )
+    direct = _try_direct_confirmation(
+        conversation, user_text, actor, base_url, session_key)
+    if direct is not None:
+        return direct
     model_messages = (
         [{'role': 'system', 'content': SYSTEM_PROMPT}]
         + _history_messages(conversation)
@@ -328,6 +473,7 @@ def run_turn(conversation, user_text, base_url='', session_key=''):
                 content=assistant_text,
             )
             if not calls:
+                _maybe_auto_propose_creation(conversation, actor, session_key)
                 return assistant_text or DEGRADED_REPLY
 
             model_messages.append({

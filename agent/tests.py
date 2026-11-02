@@ -503,3 +503,98 @@ class ChatViewTest(TestCase):
         from escrow.models import EscrowContract
         contract = EscrowContract.objects.get(creator_email='creator@example.com')
         self.assertEqual(contract.status, 'awaiting_counterparty')
+
+    def test_complete_draft_auto_proposes_creation(self):
+        from decimal import Decimal
+        from escrow.models import EscrowDraft
+        from agent.loop import run_turn
+        from agent.loop import get_or_create_conversation
+        convo = get_or_create_conversation('web', 'sess-auto-convo')
+        convo.owner_email = 'buyer@example.com'
+        convo.save(update_fields=['owner_email'])
+        EscrowDraft.objects.create(
+            owner_email='buyer@example.com', owner_session='sess-auto',
+            title='Laptop', description='Laptop', amount=Decimal('50000'),
+            fee_payer='buyer', creator_role='buyer',
+            counterparty_email='seller@example.com', inspection_days=3)
+        with patch('agent.loop.chat', return_value={
+                'text': 'Here are the terms — confirm?', 'tool_calls': [],
+                'usage': {}}):
+            run_turn(convo, 'looks good', session_key='sess-auto')
+        convo.refresh_from_db()
+        pending = convo.pending_action or {}
+        self.assertEqual(pending.get('tool'), 'request_escrow_creation')
+        self.assertIn('draft_id', pending.get('arguments') or {})
+
+    def test_incomplete_draft_does_not_auto_propose(self):
+        from escrow.models import EscrowDraft
+        from agent.loop import run_turn
+        from agent.loop import get_or_create_conversation
+        convo = get_or_create_conversation('web', 'sess-auto2-convo')
+        convo.owner_email = 'buyer@example.com'
+        convo.save(update_fields=['owner_email'])
+        EscrowDraft.objects.create(
+            owner_email='buyer@example.com', owner_session='sess-auto2',
+            title='Partial only')
+        with patch('agent.loop.chat', return_value={
+                'text': 'What else?', 'tool_calls': [], 'usage': {}}):
+            run_turn(convo, 'hi', session_key='sess-auto2')
+        convo.refresh_from_db()
+        self.assertEqual(convo.pending_action, {})
+
+    def test_bare_yes_executes_pending_without_model(self):
+        from agent.loop import propose_action, run_turn
+        from escrow.models import EscrowContract
+        from decimal import Decimal
+        EscrowContract.objects.create(
+            code='TRSTdy001', title='T', description='D',
+            amount=Decimal('50000'), service_fee=Decimal('1500'),
+            fee_payer='buyer', creator_email='buyer@x.com',
+            creator_role='buyer', counterparty_email='seller@x.com',
+            status='in_transit', gateway_reference='REF_DY1')
+        from agent.loop import get_or_create_conversation
+        convo = get_or_create_conversation('web', 'sess-direct')
+        convo.owner_email = 'buyer@x.com'
+        convo.save(update_fields=['owner_email'])
+        propose_action(convo, 'request_dispute_submission',
+                       {'escrow_reference': 'TRSTdy001', 'reason': 'Late'})
+        with patch('agent.loop.chat') as mock_chat:
+            reply = run_turn(convo, 'yes')
+            mock_chat.assert_not_called()
+        self.assertIn('Dispute raised', reply)
+        self.assertEqual(
+            EscrowContract.objects.get(code='TRSTdy001').status, 'disputed')
+
+    def test_yes_but_changed_terms_goes_to_model(self):
+        from agent.loop import propose_action, run_turn
+        from agent.loop import get_or_create_conversation
+        convo = get_or_create_conversation('web', 'sess-direct')
+        convo.owner_email = 'buyer@x.com'
+        convo.save(update_fields=['owner_email'])
+        propose_action(convo, 'request_dispute_submission',
+                       {'escrow_reference': 'X', 'reason': 'Late'})
+        with patch('agent.loop.chat', return_value={
+                'text': 'Tell me more.', 'tool_calls': [], 'usage': {}}) as mock_chat:
+            run_turn(convo, 'yes but change it to 40000')
+            mock_chat.assert_called()
+
+    def test_natural_yes_executes_pending(self):
+        from agent.loop import propose_action, run_turn
+        from escrow.models import EscrowContract
+        from decimal import Decimal
+        EscrowContract.objects.create(
+            code='TRSTdy002', title='T', description='D',
+            amount=Decimal('50000'), service_fee=Decimal('1500'),
+            fee_payer='buyer', creator_email='buyer@x.com',
+            creator_role='buyer', counterparty_email='seller@x.com',
+            status='in_transit', gateway_reference='REF_DY2')
+        from agent.loop import get_or_create_conversation
+        convo = get_or_create_conversation('web', 'sess-direct2')
+        convo.owner_email = 'buyer@x.com'
+        convo.save(update_fields=['owner_email'])
+        propose_action(convo, 'request_dispute_submission',
+                       {'escrow_reference': 'TRSTdy002', 'reason': 'Late'})
+        with patch('agent.loop.chat') as mock_chat:
+            reply = run_turn(convo, 'Yes, raise it now.')
+            mock_chat.assert_not_called()
+        self.assertIn('Dispute raised', reply)
