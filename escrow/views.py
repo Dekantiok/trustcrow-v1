@@ -14,7 +14,7 @@ from .forms import ContractCreationForm, SettlementVaultForm
 from .gateways import get_payment_gateway
 from .invitations import send_counterparty_invitation
 from .lifecycle import notify_event
-from .models import EscrowContract, TransitionError, WebhookEvent
+from .models import EscrowContract, SettlementVault, TransitionError, WebhookEvent
 from .services import (
     calculate_service_fee,
     confirm_funding_payment,
@@ -542,6 +542,8 @@ def buyer_confirm_receipt(request, code):
         pass
     else:
         notify_event('receipt_confirmed', contract)
+        if not SettlementVault.objects.filter(contract=contract).exists():
+            notify_event('bank_details_needed', contract)
     return redirect('contract_detail', code=contract.code)
 
 

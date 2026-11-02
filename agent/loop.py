@@ -62,6 +62,10 @@ missing thing per message, most important first.
   received -> confirm receipt (inspection starts). Each step updates \
   the server and notifies the other party automatically.
   BANK: before release the seller must have payout details saved. \
+  The moment receipt is confirmed, ask the SELLER for bank details \
+  if seller_bank_saved is false — and whenever a seller checks an \
+  escrow in dispatch/transit/inspection without saved details, \
+  ask then too. Do not wait until release is attempted. \
   Ask for bank name + 10-digit account number, match the name with \
   get_bank_list, confirm the exact account, then call \
   request_seller_bank_details — the backend verifies the name.
@@ -334,9 +338,13 @@ def _direct_reply(name, outcome):
                 "and the seller will be notified to ship.")
     if name == 'request_delivery_confirmation':
         if data.get('status') == 'in_inspection':
-            return ("Receipt confirmed — the inspection window has "
+            note = ("Receipt confirmed — the inspection window has "
                     "started. Say \"release\" when you're happy, or "
                     "\"dispute\" if something is wrong.")
+            if data.get('seller_bank_saved') is False:
+                note += (" The seller has been asked for their payout "
+                         "bank details, which are needed before release.")
+            return note
         return ("Marked as dispatched — the buyer has been notified. "
                 "I'll update you when they confirm receipt.")
     if name == 'request_release_approval':

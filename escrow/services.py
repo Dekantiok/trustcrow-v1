@@ -429,6 +429,73 @@ def complete_counterparty_join(code, actor_email):
     return contract, ''
 
 
+def escrow_next_step(contract, actor_email):
+    """Short 'what happens next for you' line for a party on an escrow."""
+    actor = normalize_email(actor_email)
+    is_buyer = actor == contract.buyer_email
+    has_vault = SettlementVault.objects.filter(contract=contract).exists()
+    status = contract.status
+    if status == 'awaiting_counterparty':
+        return ("Waiting for the counterparty to join — share the code "
+                "with them." if actor == contract.creator_email else
+                "Say \"join\" to accept and continue.")
+    if status == 'awaiting_funding':
+        return ('Say "fund" and I\'ll get your payment link.'
+                if is_buyer else
+                "Waiting for the buyer to fund this escrow.")
+    if status == 'awaiting_dispatch':
+        return ("Waiting for the seller to ship." if is_buyer else
+                'Tell me "shipped" once you have dispatched it.')
+    if status == 'in_transit':
+        return ('Tell me "received" when it arrives.' if is_buyer else
+                "Waiting for the buyer to confirm receipt.")
+    if status == 'in_inspection':
+        if is_buyer:
+            return ('Say "release" to pay the seller, or "dispute" if '
+                    "something is wrong."
+                    + ("" if has_vault else
+                       " The seller still needs to add payout bank details."))
+        return ("Waiting for the buyer to release or dispute."
+                if has_vault else
+                "I need your payout bank details: tell me your bank name "
+                "and 10-digit account number and I'll verify and save them.")
+    if status == 'pending_payout':
+        return "Payout is being processed."
+    if status == 'completed':
+        return "This escrow is complete — the seller has been paid."
+    if status == 'disputed':
+        return "This escrow is disputed; funds are frozen pending review."
+    if status == 'cancelled':
+        return "This escrow was cancelled."
+    return f"Current status: {status}."
+
+
+def resume_escrow_after_verification(code, actor_email):
+    """Resume an escrow for EITHER party after email proof.
+
+    Returns (contract, kind, error) where kind is 'joined' (the
+    counterparty just joined), 'resumed' (a party continuing their own
+    escrow), or '' with an error for non-parties / unknown codes.
+    Continuing is not joining: creators and already-joined parties must
+    never be told they 'are not the counterparty'.
+    """
+    actor = normalize_email(actor_email)
+    contract = EscrowContract.objects.filter(code=(code or '').strip()).first()
+    if contract is None:
+        return None, '', "No escrow found with that code."
+    if actor not in (contract.buyer_email, contract.seller_email):
+        return None, '', (
+            "That email is not linked to this escrow. Use the email the "
+            "escrow was created with.")
+    if (actor == contract.counterparty_email
+            and contract.status == 'awaiting_counterparty'):
+        joined, error = complete_counterparty_join(code, actor)
+        if joined is None:
+            return None, '', error
+        return joined, 'joined', ''
+    return contract, 'resumed', ''
+
+
 def contracts_for_email(email, include_closed=False):
     email = normalize_email(email)
     queryset = EscrowContract.objects.filter(

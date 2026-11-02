@@ -204,6 +204,8 @@ def tool_get_authorized_escrow_status(actor, **kwargs):
             contract.seller_confirmed if actor == contract.buyer_email
             else contract.buyer_confirmed
         ),
+        'seller_bank_saved': SettlementVault.objects.filter(
+            contract=contract).exists(),
         'inspection_ends': (
             contract.inspection_ends.isoformat()
             if contract.inspection_ends else None
@@ -406,7 +408,15 @@ def tool_request_delivery_confirmation(actor, **kwargs):
     audit(f'delivery.{stage}_confirmed', actor=actor, escrow=contract)
     notify_event('dispatch_confirmed' if stage == 'dispatch' else 'receipt_confirmed',
                  contract)
-    return {'ok': True, 'data': {'reference': contract.code, 'status': contract.status}}
+    bank_saved = SettlementVault.objects.filter(contract=contract).exists()
+    if stage == 'receipt' and not bank_saved:
+        # The seller cannot be paid without payout details — ask now,
+        # at receipt, not later when the buyer tries to release.
+        notify_event('bank_details_needed', contract)
+    return {'ok': True, 'data': {
+        'reference': contract.code, 'status': contract.status,
+        'seller_bank_saved': bank_saved,
+    }}
 
 
 def tool_request_release_approval(actor, **kwargs):

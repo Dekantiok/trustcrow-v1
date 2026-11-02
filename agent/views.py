@@ -25,10 +25,11 @@ from escrow.invitations import send_counterparty_invitation
 from escrow.models import EscrowDraft, TransitionError
 from escrow.services import (
     audit,
-    complete_counterparty_join,
     consume_otp,
     create_escrow_from_validated,
+    escrow_next_step,
     issue_otp,
+    resume_escrow_after_verification,
 )
 from escrow.utils import normalize_email
 from voice.transcriber import (
@@ -87,20 +88,19 @@ def _complete_pending_join(conversation, email):
         conversation.save(update_fields=['pending_context'])
     if not code:
         return None
-    contract, error = complete_counterparty_join(code, email)
+    contract, kind, error = resume_escrow_after_verification(code, email)
     if contract is None:
-        return f"You're verified, but I couldn't join that escrow: {error}"
+        return f"You're verified, but I can't continue that escrow: {error}"
     role = 'buyer' if email == contract.buyer_email else 'seller'
-    audit('counterparty.joined_via_chat', actor=email, escrow=contract)
-    if role == 'buyer':
+    audit(f'counterparty.{kind}_via_chat', actor=email, escrow=contract)
+    if kind == 'joined':
         return (f"Verified and joined — escrow {contract.code} "
-                f"({contract.title}, {contract.amount} {contract.currency}) "
-                "is now awaiting funding. Say \"fund\" and I'll get your "
-                "payment link.")
-    return (f"Verified and joined — escrow {contract.code} "
-            f"({contract.title}, {contract.amount} {contract.currency}) "
-            "is now awaiting funding. The creator has been notified; "
-            "I'll tell you here when it's funded so you can ship.")
+                f"({contract.title}, {contract.amount} {contract.currency}). "
+                + escrow_next_step(contract, email))
+    return (f"Verified — welcome back. You're the {role} on escrow "
+            f"{contract.code} ({contract.title}, {contract.amount} "
+            f"{contract.currency}), currently {contract.status}. "
+            + escrow_next_step(contract, email))
 
 
 def _is_discard_command(text):

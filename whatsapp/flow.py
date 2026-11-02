@@ -18,10 +18,11 @@ from escrow.invitations import send_counterparty_invitation
 from escrow.models import EscrowDraft, TransitionError
 from escrow.services import (
     audit,
-    complete_counterparty_join,
     consume_otp,
     create_escrow_from_validated,
+    escrow_next_step,
     issue_otp,
+    resume_escrow_after_verification,
 )
 from escrow.utils import normalize_email
 
@@ -166,16 +167,17 @@ def _join_reply_after_verify(conversation, email):
         conversation.save(update_fields=['pending_context'])
     if not code:
         return None
-    contract, error = complete_counterparty_join(code, email)
+    contract, kind, error = resume_escrow_after_verification(code, email)
     if contract is None:
-        return f"You're verified, but I couldn't join that escrow: {error}"
-    audit('counterparty.joined_via_whatsapp', actor=email, escrow=contract)
-    if email == contract.buyer_email:
-        return (f"Verified and joined — escrow {contract.code} is now "
-                "awaiting funding. Say \"fund\" and I'll get your payment link.")
-    return (f"Verified and joined — escrow {contract.code} is now "
-            "awaiting funding. The creator has been notified; I'll "
-            "message you here when it's funded so you can ship.")
+        return f"You're verified, but I can't continue that escrow: {error}"
+    audit(f'counterparty.{kind}_via_whatsapp', actor=email, escrow=contract)
+    if kind == 'joined':
+        return (f"Verified and joined — escrow {contract.code}. "
+                + escrow_next_step(contract, email))
+    role = 'buyer' if email == contract.buyer_email else 'seller'
+    return (f"Verified — welcome back. You're the {role} on escrow "
+            f"{contract.code}, currently {contract.status}. "
+            + escrow_next_step(contract, email))
 
 
 def _looks_like_email(text):

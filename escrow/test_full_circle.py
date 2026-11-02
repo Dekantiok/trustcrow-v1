@@ -254,3 +254,99 @@ class CreatorNotifiedTest(TestCase):
         self.assertEqual(mock_send.call_count, 1)
         self.assertEqual(mock_send.call_args[0][0], '234SELLER')
         self.assertIn('joined', mock_send.call_args[0][1])
+
+class ResumeEitherPartyTest(TestCase):
+    def setUp(self):
+        patcher = patch('escrow.services.send_otp_via_termii', return_value=True)
+        self.mock_send = patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def test_creator_resumes_own_escrow(self):
+        from escrow.services import resume_escrow_after_verification
+        contract = make_contract(code='TRSTfc050', status='awaiting_funding')
+        resumed, kind, error = resume_escrow_after_verification(
+            contract.code, 'seller@x.com')
+        self.assertIsNotNone(resumed, error)
+        self.assertEqual(kind, 'resumed')
+        contract.refresh_from_db()
+        self.assertEqual(contract.status, 'awaiting_funding')
+
+    def test_joined_counterparty_resumes_not_rejoins(self):
+        from escrow.services import resume_escrow_after_verification
+        contract = make_contract(code='TRSTfc051', status='awaiting_funding')
+        resumed, kind, _ = resume_escrow_after_verification(
+            contract.code, 'buyer@x.com')
+        self.assertEqual(kind, 'resumed')
+
+    def test_counterparty_still_joins_via_resume(self):
+        from escrow.services import resume_escrow_after_verification
+        contract = make_contract(code='TRSTfc052')
+        resumed, kind, _ = resume_escrow_after_verification(
+            contract.code, 'buyer@x.com')
+        self.assertEqual(kind, 'joined')
+        contract.refresh_from_db()
+        self.assertEqual(contract.status, 'awaiting_funding')
+
+    def test_non_party_refused(self):
+        from escrow.services import resume_escrow_after_verification
+        contract = make_contract(code='TRSTfc053', status='awaiting_funding')
+        resumed, kind, error = resume_escrow_after_verification(
+            contract.code, 'stranger@x.com')
+        self.assertIsNone(resumed)
+        self.assertIn('not linked', error)
+
+    def test_creator_continue_in_chat_welcomes_back(self):
+        contract = make_contract(code='TRSTfc054', status='awaiting_funding')
+        self.client.get('/assistant/')
+        from agent.models import AIConversation
+        convo = AIConversation.objects.get(channel='web')
+        convo.messages.create(
+            role='user', content=f'continue {contract.code}')
+        convo.pending_email = 'seller@x.com'
+        convo.pending_context = {'join_escrow_reference': contract.code}
+        convo.save(update_fields=['pending_email', 'pending_context'])
+        issue_otp('seller@x.com', 'reauth')
+        code = self.mock_send.call_args[0][1]
+        response = self.client.post('/assistant/send/', {'message': code})
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'welcome back')
+        self.assertNotContains(response, "can't continue")
+        contract.refresh_from_db()
+        self.assertEqual(contract.status, 'awaiting_funding')
+
+    def test_receipt_asks_seller_for_bank_details(self):
+        contract = make_contract(
+            code='TRSTfc055', status='in_transit',
+            creator='seller@x.com', creator_role='seller',
+            counterparty='buyer@x.com')
+        with patch('agent.registry.notify_event') as mock_notify:
+            result = execute('request_delivery_confirmation',
+                             {'escrow_reference': contract.code,
+                              'stage': 'receipt'},
+                             actor_email='buyer@x.com')
+        self.assertTrue(result['ok'], result)
+        self.assertFalse(result['data']['seller_bank_saved'])
+        events = [c.args[0] for c in mock_notify.call_args_list]
+        self.assertIn('receipt_confirmed', events)
+        self.assertIn('bank_details_needed', events)
+
+    def test_status_reports_bank_saved_flag(self):
+        contract = make_contract(code='TRSTfc056', status='in_inspection')
+        result = execute('get_authorized_escrow_status',
+                         {'escrow_reference': contract.code},
+                         actor_email='buyer@x.com')
+        self.assertTrue(result['ok'])
+        self.assertFalse(result['data']['seller_bank_saved'])
+        SettlementVault.objects.create(
+            contract=contract, bank_name='B', bank_code='058',
+            account_number='0123456789', account_name='S')
+        result = execute('get_authorized_escrow_status',
+                         {'escrow_reference': contract.code},
+                         actor_email='seller@x.com')
+        self.assertTrue(result['data']['seller_bank_saved'])
+
+    def test_next_step_asks_seller_for_bank_in_inspection(self):
+        from escrow.services import escrow_next_step
+        contract = make_contract(code='TRSTfc057', status='in_inspection')
+        step = escrow_next_step(contract, 'seller@x.com')
+        self.assertIn('bank', step.lower())
