@@ -208,6 +208,26 @@
         .voice-hint { min-height: 1.2em; }
         #chat-mic { flex: none; }
 
+        /* Typing indicator: three bouncing dots in an assistant bubble. */
+        .typing-dots { display: inline-flex; align-items: center; gap: 6px; padding: 6px 2px; }
+        .typing-dots span { width: 8px; height: 8px; border-radius: 50%; background: var(--color-faint); display: inline-block; }
+        @media (prefers-reduced-motion: no-preference) {
+            .typing-dots span { animation: typing-bounce 1.2s ease-in-out infinite; }
+            .typing-dots span:nth-child(2) { animation-delay: 0.15s; }
+            .typing-dots span:nth-child(3) { animation-delay: 0.3s; }
+            @keyframes typing-bounce { 0%, 60%, 100% { transform: translateY(0); opacity: .5; } 30% { transform: translateY(-5px); opacity: 1; } }
+        }
+        /* Recording state: pulsing red ring + live timer on the mic. */
+        .mic-recording { position: relative; border-color: var(--color-danger) !important; color: var(--color-danger) !important; }
+        @media (prefers-reduced-motion: no-preference) {
+            .mic-recording::after { content: ""; position: absolute; inset: -4px; border-radius: var(--radius-md); border: 2px solid var(--color-danger); opacity: .6; animation: mic-pulse 1.2s ease-out infinite; pointer-events: none; }
+            @keyframes mic-pulse { 0% { transform: scale(.95); opacity: .7; } 100% { transform: scale(1.12); opacity: 0; } }
+        }
+        .rec-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--color-danger); margin-right: 6px; vertical-align: baseline; }
+        @media (prefers-reduced-motion: no-preference) {
+            .rec-dot { animation: pulse 1s ease-in-out infinite; }
+        }
+
         /* OTP entry. */
         .otp-input { font-size: 1.9rem; letter-spacing: 0.35em; text-align: center; text-indent: 0.35em; padding: 16px 8px; }
 

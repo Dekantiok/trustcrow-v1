@@ -78,6 +78,46 @@
   }
 
   /* Mic toggle button for text inputs/textareas with data-voice. */
+  function fmtElapsed(ms) {
+    var s = Math.floor(ms / 1000);
+    return Math.floor(s / 60) + ':' + ('0' + (s % 60)).slice(-2);
+  }
+
+  function showTyping() {
+    var thread = document.getElementById('chat-thread');
+    if (!thread) return;
+    if (!document.getElementById('chat-typing')) {
+      var row = document.createElement('div');
+      row.className = 'd-flex justify-content-start';
+      row.id = 'chat-typing';
+      row.setAttribute('aria-live', 'polite');
+      row.innerHTML = '<div class="rounded-3 px-3 py-2 bubble-theirs">' +
+        '<span class="typing-dots"><span></span><span></span><span></span></span></div>';
+      thread.appendChild(row);
+    }
+    thread.scrollTop = thread.scrollHeight;
+  }
+
+  function hideTyping() {
+    var row = document.getElementById('chat-typing');
+    if (row) row.remove();
+  }
+
+  /* Typing bubble while a typed message waits for the agent reply. */
+  function initChatIndicators() {
+    if (!window.htmx) return;
+    document.body.addEventListener('htmx:beforeRequest', function (event) {
+      var form = document.getElementById('chat-form');
+      if (form && event.detail && event.detail.elt === form) showTyping();
+    });
+    var hide = function (event) {
+      if (event.detail && event.detail.target &&
+          event.detail.target.id === 'chat-result') hideTyping();
+    };
+    document.body.addEventListener('htmx:afterSwap', hide);
+    document.body.addEventListener('htmx:responseError', hideTyping);
+  }
+
   function attachFieldMic(field) {
     if (field.dataset.voiceAttached) return;
     field.dataset.voiceAttached = '1';
@@ -113,33 +153,51 @@
     btn.addEventListener('pointerdown', function (e) {
       e.preventDefault();
       if (stop || btn.disabled) return;
-      btn.innerHTML = '<i class="bi bi-stop-circle"></i> Recording… release to send';
-      hint.textContent = '';
+      btn.innerHTML = '<i class="bi bi-stop-circle"></i>';
+      hint.innerHTML = '<span class="rec-dot"></span><span class="rec-time">0:00</span> — release to send';
+      btn.classList.add('mic-recording');
       try { btn.setPointerCapture(e.pointerId); } catch (err) {}
       startedAt = Date.now();
+      var tickField = function () {
+        var el = hint.querySelector('.rec-time');
+        if (el) el.textContent = fmtElapsed(Date.now() - startedAt);
+      };
+      var recTimerField = setInterval(tickField, 500);
+      var stopRecFieldUI = function () {
+        clearInterval(recTimerField);
+        btn.classList.remove('mic-recording');
+      };
       stop = recordOnce(sendBlob, function () {
         stop = null;
+        stopRecFieldUI();
         btn.innerHTML = '<i class="bi bi-mic"></i>';
         hint.textContent = 'Microphone unavailable.';
       });
+      btn._stopRecUI = stopRecFieldUI;
     });
     function releaseToSend() {
       if (!stop) return;
       if (Date.now() - startedAt < 400) {
-        var s = stop; stop = null; s();
+        var s = stop; stop = null;
+        if (btn._stopRecUI) btn._stopRecUI();
+        s();
         btn.innerHTML = '<i class="bi bi-mic"></i>';
         hint.textContent = 'Hold the mic button while you speak.';
         return;
       }
       var send = stop; stop = null;
+      if (btn._stopRecUI) btn._stopRecUI();
       btn.innerHTML = '<i class="bi bi-hourglass-split"></i>';
       btn.disabled = true;
+      hint.textContent = 'Transcribing…';
       send();
     }
     function cancelHold() {
       if (!stop) return;
       var s = stop; stop = null;
+      if (btn._stopRecUI) btn._stopRecUI();
       btn.innerHTML = '<i class="bi bi-mic"></i>';
+      hint.textContent = '';
     }
     btn.addEventListener('pointerup', releaseToSend);
     btn.addEventListener('pointerleave', releaseToSend);
@@ -165,13 +223,22 @@
     mic.title = 'Hold to record a voice note';
     mic.style.touchAction = 'none';
     mic.addEventListener('contextmenu', function (e) { e.preventDefault(); });
+    var recTimer = null;
+    function stopRecUI() {
+      if (recTimer) clearInterval(recTimer);
+      recTimer = null;
+      mic.classList.remove('mic-recording');
+    }
     function setIdle() {
       stop = null;
+      stopRecUI();
       mic.innerHTML = '<i class="bi bi-mic"></i>';
       mic.disabled = false;
     }
     function uploadBlob(blob) {
       stop = null;
+      showTyping();
+      if (hint) hint.textContent = '';
       var fd = new FormData();
       fd.append('audio', blob, 'note.webm');
       fetch('/assistant/voice/', {
@@ -187,7 +254,8 @@
         }
         if (hint) hint.textContent = '';
         setIdle();
-      }).catch(function () {
+      }).then(function () { hideTyping(); }).catch(function () {
+        hideTyping();
         if (hint) hint.textContent = 'Voice failed — please type instead.';
         setIdle();
       });
@@ -197,8 +265,15 @@
       if (stop || mic.disabled) return;
       if (hint) hint.textContent = '';
       mic.innerHTML = '<i class="bi bi-stop-circle"></i>';
+      mic.classList.add('mic-recording');
+      if (hint) hint.innerHTML = '<span class="rec-dot"></span><span class="rec-time">0:00</span> — release to send';
       try { mic.setPointerCapture(e.pointerId); } catch (err) {}
       startedAt = Date.now();
+      var tickChat = function () {
+        var el = hint ? hint.querySelector('.rec-time') : null;
+        if (el) el.textContent = fmtElapsed(Date.now() - startedAt);
+      };
+      recTimer = setInterval(tickChat, 500);
       stop = recordOnce(uploadBlob, function () {
         if (hint) hint.textContent = 'Microphone unavailable.';
         setIdle();
@@ -207,20 +282,25 @@
     function releaseToSend() {
       if (!stop) return;
       if (Date.now() - startedAt < 400) {
-        var s = stop; stop = null; s();
+        var s = stop; stop = null;
+        stopRecUI();
+        s();
         mic.innerHTML = '<i class="bi bi-mic"></i>';
         if (hint) hint.textContent = 'Hold the mic button while you speak.';
         return;
       }
       var send = stop; stop = null;
+      stopRecUI();
       mic.disabled = true;
       mic.innerHTML = '<i class="bi bi-hourglass-split"></i>';
-      if (hint) hint.textContent = 'Transcribing…';
+      if (hint) hint.textContent = '';
+      showTyping();
       send();
     }
     function cancelHold() {
       if (!stop) return;
       var s = stop; stop = null;
+      stopRecUI();
       mic.innerHTML = '<i class="bi bi-mic"></i>';
     }
     mic.addEventListener('pointerup', releaseToSend);
@@ -234,10 +314,14 @@
     postAudio: postAudio,
     initFieldMics: initFieldMics,
     initChatMic: initChatMic,
+    initChatIndicators: initChatIndicators,
+    showTyping: showTyping,
+    hideTyping: hideTyping,
   };
 
   document.addEventListener('DOMContentLoaded', function () {
     initFieldMics();
     initChatMic();
+    initChatIndicators();
   });
 })();
