@@ -84,11 +84,11 @@ class ChatE2ETest(TestCase):
             channel='web', channel_identity=f'session:{key}')
 
     def confirm_tool(self, client, name, arguments, cid):
-        """Gate + confirm: first call proposes, second identical executes."""
+        """Gate + confirm: first call proposes; a bare 'yes' then executes
+        deterministically in the backend (no second model call scripted)."""
         self.send(client, 'go ahead', [tool_call(name, arguments, cid),
                                        text_reply('Please confirm.')])
-        self.send(client, 'yes, I confirm', [tool_call(name, arguments, cid + 'b'),
-                                             text_reply('Done.')])
+        self.send(client, 'yes, I confirm')
 
     # -- one full circle ---------------------------------------------------
     def run_circle(self, tag, creator_role, fee_payer):
@@ -114,9 +114,10 @@ class ChatE2ETest(TestCase):
             }, 'd1'), text_reply('Draft saved. Confirm?')])
         draft = EscrowDraft.objects.latest('id')
 
-        # 2. Creator confirms; creation parks on the emailed code.
-        self.confirm_tool(creator, 'request_escrow_creation',
-                          {'draft_id': draft.id}, 'cr')
+        # 2. Creator confirms; the complete draft was auto-proposed at the
+        # end of the last turn, so a bare 'yes' executes it directly and
+        # creation parks on the emailed code.
+        self.send(creator, 'yes, I confirm')
         outcome = self.tool_outcome(self.convo_of(creator), 'request_escrow_creation')
         self.assertTrue(outcome['ok'], outcome)
         self.assertTrue(outcome['data'].get('verification_required'), outcome)
