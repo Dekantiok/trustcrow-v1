@@ -49,7 +49,7 @@ missing thing per message, most important first.
   CREATE: describe the deal, confirm terms, then the creator pastes \
   the emailed code here and the escrow exists — give them the TRST \
   code to share.
-  JOIN: the counterparty gives you the TRST code; get their email and \
+  JOIN/CONTINUE: the user gives you the TRST code (words like join, continue, resume, track all mean this — chat history is wiped on refresh, so this is how anyone picks up an existing escrow); get their email and \
   call request_verification_code WITH that code (it completes the \
   join when they paste the returned code). If already verified, check \
   status, show the terms, and after they confirm call \
@@ -224,35 +224,33 @@ def clear_proposal(conversation):
     conversation.save(update_fields=['pending_action'])
 
 
+def restart_thread(conversation):
+    """Page load means a brand-new chat — no exceptions.
+
+    History, pending proposals, pending verification, flow context, and
+    the verified owner are all cleared, and this session's unfinished
+    drafts are abandoned. Nothing about an escrow is lost: its state
+    lives on the backend, and the user resumes only by asking to join
+    or continue with the TRST code and re-verifying their email.
+    """
+    conversation.messages.all().delete()
+    conversation.pending_action = {}
+    conversation.pending_email = None
+    conversation.pending_context = {}
+    conversation.owner_email = None
+    conversation.save(update_fields=[
+        'pending_action', 'pending_email', 'pending_context', 'owner_email'])
+    _abandon_session_drafts(conversation)
+    return {}
+
+
+# Backwards-compatible alias; page loads now always restart.
 def reset_thread_unless_live(conversation):
-    """Clean thread for a page load unless mid-flow.
-
-    Refreshing shows an empty chat instead of stale history. A fresh
-    (unexpired) proposal — awaiting confirmation or an emailed code — is
-    left intact with its messages so an in-flight flow survives a reload.
-    Anonymous drafts from earlier visits are abandoned (verified owners'
-    drafts are kept); the agent only ever touches a draft the user asks
-    about. Returns the live pending dict, or {}.
-    """
-    pending = conversation.pending_action or {}
-    if pending.get('tool') and not _proposal_fresh(pending):
-        clear_proposal(conversation)
-        conversation.refresh_from_db()
-        pending = {}
-    if not pending.get('tool'):
-        conversation.messages.all().delete()
-        _abandon_anonymous_drafts(conversation, pending)
-        return {}
-    return pending
+    return restart_thread(conversation)
 
 
-def _abandon_anonymous_drafts(conversation, pending):
-    """Drop last-visit drafts nobody verified.
-
-    Drafts are session-bound, so without this an unverified visitor would
-    be haunted by deals they described days ago. Verified owners' drafts
-    survive; the live proposal's draft always survives.
-    """
+def _abandon_session_drafts(conversation):
+    """Abandon this web session's unfinished drafts on restart."""
     if conversation.channel != 'web':
         return
     from escrow.models import EscrowDraft
@@ -260,18 +258,9 @@ def _abandon_anonymous_drafts(conversation, pending):
     session_key = identity.split('session:', 1)[-1] if 'session:' in identity else ''
     if not session_key:
         return
-    live_draft = pending.get('draft_id') or (pending.get('arguments') or {}).get('draft_id')
-    qs = EscrowDraft.objects.filter(
-        owner_session=session_key, status__in=('draft', 'proposed'))
-    if live_draft:
-        try:
-            qs = qs.exclude(id=int(live_draft))
-        except (TypeError, ValueError):
-            pass
-    verified = (conversation.owner_email or '').strip().lower()
-    if verified:
-        qs = qs.exclude(owner_email=verified)
-    qs.update(status='abandoned')
+    EscrowDraft.objects.filter(
+        owner_session=session_key, status__in=('draft', 'proposed'),
+    ).update(status='abandoned')
 
 
 def confirmed(conversation, name, arguments):

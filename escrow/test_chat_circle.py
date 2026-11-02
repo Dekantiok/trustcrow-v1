@@ -138,7 +138,7 @@ class DraftAmnesiaTest(TestCase):
         draft.refresh_from_db()
         self.assertEqual(draft.status, 'abandoned')
 
-    def test_reload_keeps_verified_owner_drafts(self):
+    def test_reload_abandons_even_verified_owner_drafts(self):
         convo = self._convo()
         session = self.client.session
         session['chat_verified_email'] = 'me@x.com'
@@ -151,7 +151,7 @@ class DraftAmnesiaTest(TestCase):
             title='Mine', amount=Decimal('50000'))
         self.client.get('/assistant/')
         draft.refresh_from_db()
-        self.assertEqual(draft.status, 'draft')
+        self.assertEqual(draft.status, 'abandoned')
 
     def test_abandoned_draft_cannot_be_used(self):
         convo = self._convo()

@@ -128,20 +128,16 @@ def is_party(contract, request):
 
 
 def home_view(request):
-    from agent.loop import get_or_create_conversation, reset_thread_unless_live
+    from agent.loop import get_or_create_conversation, restart_thread
     if not request.session.session_key:
         request.session.save()
     conversation = get_or_create_conversation(
         'web', f"session:{request.session.session_key}"
     )
-    verified = normalize_email(request.session.get('chat_verified_email', ''))
-    if verified and not conversation.owner_email:
-        conversation.owner_email = verified
-        conversation.save(update_fields=['owner_email'])
-    elif conversation.owner_email and conversation.owner_email != verified:
-        conversation.owner_email = verified or None
-        conversation.save(update_fields=['owner_email'])
-    pending = reset_thread_unless_live(conversation)
+    # Landing on the home page also restarts the chat from zero.
+    request.session.pop('chat_verified_email', None)
+    request.session.pop('chat_pending_email', None)
+    pending = restart_thread(conversation)
     context = {
         'messages': list(conversation.messages.order_by('id')),
         'pending': pending or None,

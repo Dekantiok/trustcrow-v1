@@ -439,19 +439,30 @@ class ChatViewTest(TestCase):
         convo.refresh_from_db()
         self.assertEqual(convo.messages.count(), 0)
 
-    def test_page_load_preserves_live_flow(self):
+    def test_page_load_restarts_even_live_flow(self):
         from agent.loop import propose_action
         self.client.get('/assistant/')
         from agent.models import AIConversation
         convo = AIConversation.objects.get(channel='web')
         convo.messages.create(role='user', content='keep me')
+        convo.pending_email = 'mid@x.com'
+        convo.pending_context = {'join_escrow_reference': 'TRSTabc12'}
+        convo.save(update_fields=['pending_email', 'pending_context'])
         propose_action(convo, 'request_escrow_creation', {'draft_id': 3})
+        session = self.client.session
+        session['chat_verified_email'] = 'mid@x.com'
+        session.save()
         response = self.client.get('/assistant/')
         self.assertEqual(response.status_code, 200)
-        self.assertContains(response, 'keep me')
-        self.assertContains(response, 'Your call:')
+        self.assertNotContains(response, 'keep me')
+        self.assertNotContains(response, 'Your call:')
+        self.assertContains(response, 'What are we escrowing today?')
         convo.refresh_from_db()
-        self.assertEqual(convo.messages.count(), 1)
+        self.assertEqual(convo.messages.count(), 0)
+        self.assertEqual(convo.pending_action, {})
+        self.assertIsNone(convo.pending_email)
+        self.assertEqual(convo.pending_context, {})
+        self.assertIsNone(convo.owner_email)
 
     def test_home_load_wipes_idle_history(self):
         self.client.get('/assistant/')

@@ -17,7 +17,7 @@ from agent.loop import (
     clear_proposal,
     find_pending_join_code,
     get_or_create_conversation,
-    reset_thread_unless_live,
+    restart_thread,
     run_turn,
 )
 from escrow.forms import ContractCreationForm
@@ -114,7 +114,11 @@ def _is_discard_command(text):
 
 def chat_page(request):
     conversation = _conversation(request)
-    reset_thread_unless_live(conversation)
+    # Refresh always restarts: drop the session's verified identity too,
+    # so resuming means joining/continuing with a code + fresh proof.
+    request.session.pop('chat_verified_email', None)
+    request.session.pop('chat_pending_email', None)
+    restart_thread(conversation)
     context = _thread_context(conversation, request)
     return render(request, 'agent/chat.html', context)
 
@@ -529,9 +533,11 @@ def transcribe_field(request):
 def chat_new(request):
     """Start over: wipe this browser session's thread and any proposal."""
     conversation = _conversation(request)
-    conversation.messages.all().delete()
-    clear_proposal(conversation)
-    audit('chat.restarted', actor=conversation.owner_email or 'anonymous')
+    actor = conversation.owner_email or 'anonymous'
+    request.session.pop('chat_verified_email', None)
+    request.session.pop('chat_pending_email', None)
+    restart_thread(conversation)
+    audit('chat.restarted', actor=actor)
     return render(
         request, 'agent/_thread.html',
         _thread_context(conversation, request),
