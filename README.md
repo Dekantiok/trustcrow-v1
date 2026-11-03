@@ -10,7 +10,7 @@ Built with Django + SQLite (local) / Postgres (prod) + Paystack + Termii + Baset
 
 1. **Create**, creator sets title, amount, counterparty email, role (buyer/seller), inspection days, and who pays the service fee. The draft is assembled by hand, by the AI chat, or by voice.
 2. **Verify creator**, a 6-digit email OTP proves the creator's inbox. The escrow becomes `awaiting_counterparty` and the counterparty is emailed a join link with the code prefilled.
-3. **Counterparty joins**, they open the join link, prove their own inbox with an OTP, and accept the terms. The buyer is notified (WhatsApp push when linked, AI chat brief on next visit, live dashboard panel) and the escrow moves to `awaiting_funding`.
+3. **Counterparty joins**, they open the join link, prove their own inbox with an OTP, and accept the terms. The creator is notified instantly (WhatsApp push when linked, live webchat message if their chat is open, dashboard panel) and the escrow moves to `awaiting_funding`.
 4. **Fund**, buyer pays via Paystack (card / bank / transfer) from the dashboard button or from a payment link the AI fetches in chat. Webhook + callback fallback confirm against expected amount, currency, and reference.
 5. **Dispatch**, seller confirms dispatch in chat ("dispatched") or dashboard → `in_transit`. Buyer is notified.
 6. **Receipt + inspection**, buyer confirms receipt → inspection window starts (default 3 days, auto-releases via the `auto_release_escrow` worker when eligible). Both sides are notified with the deadline.
@@ -201,6 +201,8 @@ Copy `.env.example` → `.env`. Never commit `.env`.
 | `DATABASE_URL` | prod only |, | Postgres URL (Neon/Render). `ssl_require=True`. Required: without it the app has no production database configured |
 | `DEMO_MODE` | judges | `False` | `True` stubs Termii OTP delivery and Paystack payments. AI and escrow logic stay real |
 | `DEMO_OTP_CODE` | judges | `123456` | Universal verification code accepted only while `DEMO_MODE=True` |
+| `DEMO_ALLOW_PROD` | — | `False` | Explicit opt-in allowing Demo mode with `DJANGO_DEBUG=False` (isolated demo deployments only) |
+| `WHATSAPP_MEDIA_MAX_BYTES` | — | `8388608` | Cap on downloaded WhatsApp voice notes, separate from the transcription cap |
 | `PAYSTACK_SECRET_KEY` | yes | `sk_test_dummy` | `sk_test_…` for testing, `sk_live_…` for live |
 | `TERMII_API_KEY` | yes | `dummy_key` | Termii API key for email OTP |
 | `TERMII_EMAIL_CONFIG_ID` | yes | `default_config` | Termii email config/channel ID |
@@ -270,14 +272,14 @@ agent/             # chat loop, Baseten client, tool registry, views
 whatsapp/          # Cloud API adapter, webhook, conversation flow
 voice/             # Muse transcription (ffmpeg convert + API client)
 templates/         # base.html (design system), home.html, agent/, escrow/
-static/js/         # voice.js (mic recorder shared by chat + forms)
+static/js/         # voice.js (hold-to-record mic + typing indicator + chat poll)
 manage.py
 requirements.txt
 Procfile           # web: gunicorn / worker: auto_release_escrow
 runtime.txt
 ```
 
-Design tokens, components, and responsive rules live in `templates/base.html`, and `escrow/tests.py::SmokeTest` renders every page plus checks URL reversal, run `python manage.py test` before pushing UI changes.
+Design tokens, components, and responsive rules live in `templates/base.html` (no separate frontend build; `voice.js` is the only first-party script). Run `python manage.py test` before pushing UI changes: `escrow/tests.py::SmokeTest` renders every page and checks URL reversal, and the suite covers the agent, WhatsApp, voice, and money-movement paths.
 
 ## The AI agent
 
@@ -289,7 +291,7 @@ Bounded tool-using loop (`agent/loop.py`): user message → model → approved t
 
 ## Voice notes
 
-Browser mic / WhatsApp audio → `voice/transcriber.py`: ffmpeg (pip-bundled binary, no apt) converts to 16-bit mono WAV → Muse Voice Transcribe (`PUSH_TO_TALK`, English bias, escrow vocabulary). Results feed the normal agent turn (chat) or fill form fields; failures degrade to "type instead". Throttled (20/hr per session) and size-capped since transcription is metered.
+Hold the chat mic (web) or send a WhatsApp voice note → `voice/transcriber.py`: ffmpeg (pip-bundled binary, no apt) converts to 16-bit mono WAV → Muse Voice Transcribe (`PUSH_TO_TALK`, English bias, escrow vocabulary). The transcript feeds the normal agent turn, including bare 6-digit codes; cancelled or sub-400ms holds are discarded and never transcribed. Failures degrade to "type instead"; throttled (20/hr per session) and size-capped since transcription is metered.
 
 ## Deployment (Render + Neon style)
 
@@ -307,7 +309,7 @@ Browser mic / WhatsApp audio → `voice/transcriber.py`: ffmpeg (pip-bundled bin
 - WhatsApp numbers are endpoints, not identity; verified email is the actor everywhere.
 - Security headers ship by default: `X-Frame-Options: DENY`, nosniff, same-origin referrer, microphone-only permissions policy, and a Content-Security-Policy covering self, jsDelivr, and Google Fonts.
 - Webhook signatures validated (Paystack, WhatsApp); duplicate events ignored via unique constraints.
-- Amount + currency verified on every funding confirmation; payouts idempotent with `uncertain` parking (never blind-retry a timeout).
-- Post-funding cancel requires ops refund check (see admin warning in `escrow/models.py`).
-- Agent cannot release funds, resolve disputes, or bypass auth; prompt-injection and tool-spoofing covered by tests.
+- Amount + currency verified on every funding confirmation; payouts are claimed once, parked `uncertain` on timeouts (never blind-retried), and only a `transfer.success` webhook completes an escrow — failed or reversed transfers stay in `pending_payout` for reconciliation with both parties notified.
+- Post-funding cancellation initiates an explicit provider refund (`initiate_refund`) tracked to `initiated` or `failed`; a cancelled escrow counts as refunded only after the provider confirms.
+- Agent cannot resolve disputes or bypass auth; payout release needs buyer confirmation plus verified seller bank details, and every consequential call is confirmation-gated, with prompt-injection and tool-spoofing covered by tests.
 - Keep `LOG_OTP_TO_CONSOLE=False` outside local dev.
