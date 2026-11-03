@@ -52,7 +52,10 @@ def verify_bank_account(account_number, bank_code):
     if not account_number.isdigit() or len(account_number) != 10:
         return {'status': False, 'error': 'Account number must be exactly 10 digits.'}
 
-    if settings.DEBUG:
+    if _secret() in ('', 'sk_test_dummy'):
+        # No real gateway key configured: canned answer so local flows
+        # can be exercised offline. Never used when a key exists — the
+        # resolver returns the actual account name even on test keys.
         return {
             'status': True,
             'account_name': 'TEST ACCOUNT NAME' if account_number == '0123456789'
@@ -90,7 +93,7 @@ def list_banks():
         return _bank_name_cache
 
     banks = dict(FALLBACK_BANKS)
-    if not settings.DEBUG:
+    if _secret() not in ('', 'sk_test_dummy'):
         try:
             response = requests.get(
                 "https://api.paystack.co/bank?currency=NGN",

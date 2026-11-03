@@ -374,3 +374,26 @@ class ResumeEitherPartyTest(TestCase):
         self.assertEqual(vault.account_number, '8105885425')
         self.assertTrue(vault.bank_name.startswith('OPay'))
         self.assertEqual(vault.account_name, 'FELIX K')
+
+class BankVerificationRealLookupTest(TestCase):
+    @override_settings(PAYSTACK_SECRET_KEY='sk_test_real_looking')
+    def test_real_key_uses_paystack_resolve_even_in_debug(self):
+        from unittest.mock import Mock
+        import escrow.bank_verification as bv
+        response = Mock()
+        response.json.return_value = {
+            'status': True, 'data': {'account_name': 'FELIX  KANTIOK'}}
+        with override_settings(DEBUG=True), \
+             patch.object(bv.requests, 'get', return_value=response) as mock_get:
+            result = bv.verify_bank_account('8105885425', '999992')
+        self.assertTrue(result['status'])
+        self.assertEqual(result['account_name'], 'FELIX  KANTIOK')
+        self.assertTrue(mock_get.called)
+
+    @override_settings(PAYSTACK_SECRET_KEY='sk_test_dummy')
+    def test_dummy_key_keeps_offline_mock(self):
+        import escrow.bank_verification as bv
+        with patch.object(bv.requests, 'get') as mock_get:
+            result = bv.verify_bank_account('8105885425', '999992')
+        self.assertTrue(result['status'])
+        mock_get.assert_not_called()
