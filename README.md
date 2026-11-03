@@ -166,6 +166,63 @@ Optional checks while you are there:
 - Try a wrong OTP such as `000000` once and confirm it is rejected, then use `123456`.
 - Open `/escrow/<code>/` or `/admin/` (create an admin user with `python manage.py createsuperuser`) and confirm the dashboard and audit trail match what the chats said.
 
+### Testing the WhatsApp bot (optional, ~15 minutes setup)
+
+The WhatsApp assistant runs the same agent, escrow engine, and money rules as the website. A judge needs: a Meta developer account, a WhatsApp Business test number, and a public HTTPS URL for this server (Meta cannot reach `localhost`).
+
+**1. Expose this server publicly.** In one terminal, keep the app running:
+
+```bash
+python manage.py runserver 127.0.0.1:8000
+```
+
+In a second terminal, open a tunnel (any provider works):
+
+```bash
+cloudflared tunnel --url http://127.0.0.1:8000
+# or: ngrok http 8000
+```
+
+Copy the public `https://...` URL it prints, for example `https://abc-123.trycloudflare.com`.
+
+**2. Create a WhatsApp test app.** In the [Meta App Dashboard](https://developers.facebook.com/apps), create an app, add the WhatsApp product, and complete the test-number setup (Meta provides a test phone number and a test recipient setup). Keep the dashboard open.
+
+**3. Fill in the WhatsApp settings.** In this project's `.env`:
+
+```bash
+WHATSAPP_ACCESS_TOKEN=<temporary token from the WhatsApp > API setup page>
+WHATSAPP_PHONE_NUMBER_ID=<the test phone number ID>
+WHATSAPP_WEBHOOK_VERIFY_TOKEN=<any random string you invent, e.g. trustcrow-verify-123>
+WHATSAPP_APP_SECRET=<app secret from App settings > Basic>
+WHATSAPP_API_VERSION=v21.0
+```
+
+Then restart the server so it picks them up.
+
+**4. Point Meta at this server.** Back in the dashboard, under WhatsApp > Configuration, set the callback URL to:
+
+```text
+https://<your-tunnel-host>/webhooks/whatsapp/
+```
+
+Set the verify token to the exact `WHATSAPP_WEBHOOK_VERIFY_TOKEN` value, click Verify and save, and subscribe the webhook to the `messages` field. A green checkmark means Meta reached this server.
+
+**5. Talk to the bot.** From a phone with WhatsApp, message the test business number (you may need to add it via the dashboard's test setup first):
+
+```text
+hi
+```
+
+The bot asks for your email address. Reply with an email you control, then reply with the OTP code. In Demo mode (`DEMO_MODE=True`) the code is `123456`, same as the website, and the troubleshooting table below applies.
+
+**6. Run the same circle as the web judge script.** Everything from the website script works here: describe the deal, confirm, paste the code, share the TRST code with the other party, join from the second party's own chat, fund via the payment link, dispatch, confirm receipt, add payout bank details, and release. Voice notes work too: hold the mic in WhatsApp and speak instead of typing. Differences from the web channel to expect:
+
+- Replies arrive as WhatsApp messages, and lifecycle nudges (counterparty joined, funded, shipped, payout) arrive unprompted.
+- There is no page to refresh: the conversation persists in WhatsApp, so verification and proposals carry over between sessions.
+- If a message gets no reply, the server log shows the reason. Common causes: the tunnel expired (restart it and update the dashboard callback URL), the temporary access token expired (generate a new one on the API setup page), or the webhook subscription lost the `messages` field.
+
+**7. When finished.** Stop the tunnel and revert `.env` (or leave WhatsApp blank). Nothing about WhatsApp changes the escrow state machine: an escrow started on WhatsApp is visible and actionable from the website with the same rules.
+
 ### Start again from zero
 
 ```bash
