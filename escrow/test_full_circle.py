@@ -391,7 +391,8 @@ class BankVerificationRealLookupTest(TestCase):
         self.assertEqual(result['account_name'], 'FELIX  KANTIOK')
         self.assertTrue(mock_get.called)
 
-    @override_settings(PAYSTACK_SECRET_KEY='sk_test_dummy')
+    @override_settings(PAYSTACK_SECRET_KEY='sk_test_dummy', DEBUG=True,
+                        DEMO_MODE=False)
     def test_dummy_key_keeps_offline_mock(self):
         import escrow.bank_verification as bv
         with patch.object(bv.requests, 'get') as mock_get:
