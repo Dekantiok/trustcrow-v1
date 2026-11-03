@@ -64,8 +64,29 @@ def whatsapp_numbers_for(email):
         verified_email=email).values_list('wa_id', flat=True))
 
 
-def notify_event(event, contract):
-    """Push one lifecycle update per recipient. Never raises."""
+def _append_web_message(email, text):
+    """Drop the update into the recipient's latest webchat, if any.
+
+    Open chat pages poll and swap it in live; it also greets them if
+    they return before any refresh. The actor's own chat is skipped by
+    the caller — they already saw the result of their action.
+    """
+    from agent.models import AIConversation
+    conversation = (AIConversation.objects
+                    .filter(channel='web', owner_email=email)
+                    .order_by('-updated_at', '-id').first())
+    if conversation is None:
+        return False
+    recent = conversation.messages.filter(
+        role='assistant').order_by('-id')[:5]
+    if any(row.content == text for row in recent):
+        return False
+    conversation.messages.create(role='assistant', content=text)
+    return True
+
+
+def notify_event(event, contract, actor=None):
+    """Notify recipients via WhatsApp push + their webchat. Never raises."""
     text = _copy(event, contract)
     if not text:
         return 0
@@ -78,6 +99,12 @@ def notify_event(event, contract):
                     sent += 1
         except Exception:
             logger.exception("Lifecycle notify failed for %s", email)
+        if email != actor:
+            try:
+                if _append_web_message(email, text):
+                    sent += 1
+            except Exception:
+                logger.exception("Webchat notify failed for %s", email)
     if sent:
         logger.info("Lifecycle %s for %s pushed to %d chat(s)",
                     event, contract.code, sent)

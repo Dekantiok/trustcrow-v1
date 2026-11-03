@@ -407,12 +407,12 @@ def tool_request_delivery_confirmation(actor, **kwargs):
     contract.transition_to(target, **fields)
     audit(f'delivery.{stage}_confirmed', actor=actor, escrow=contract)
     notify_event('dispatch_confirmed' if stage == 'dispatch' else 'receipt_confirmed',
-                 contract)
+                 contract, actor=actor)
     bank_saved = SettlementVault.objects.filter(contract=contract).exists()
     if stage == 'receipt' and not bank_saved:
         # The seller cannot be paid without payout details — ask now,
         # at receipt, not later when the buyer tries to release.
-        notify_event('bank_details_needed', contract)
+        notify_event('bank_details_needed', contract, actor=actor)
     return {'ok': True, 'data': {
         'reference': contract.code, 'status': contract.status,
         'seller_bank_saved': bank_saved,
@@ -429,7 +429,7 @@ def tool_request_release_approval(actor, **kwargs):
             f"This escrow cannot be released from status {contract.status}."
         )
     if not SettlementVault.objects.filter(contract=contract).exists():
-        notify_event('bank_details_needed', contract)
+        notify_event('bank_details_needed', contract, actor=actor)
         audit('release.blocked_no_vault', actor=actor, escrow=contract)
         raise ToolError(
             "The seller has not added payout bank details yet. I've "
@@ -602,7 +602,7 @@ def tool_request_dispute_submission(actor, **kwargs):
     contract.transition_to('disputed')
     audit('dispute.submitted', actor=actor, escrow=contract,
           metadata={'reason': reason[:500]})
-    notify_event('disputed', contract)
+    notify_event('disputed', contract, actor=actor)
     return {'ok': True, 'data': {
         'reference': contract.code,
         'status': contract.status,

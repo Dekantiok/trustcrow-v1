@@ -525,7 +525,8 @@ def seller_confirm_dispatch(request, code):
     except TransitionError:
         pass
     else:
-        notify_event('dispatch_confirmed', contract)
+        notify_event('dispatch_confirmed', contract,
+                     actor=get_contract_verified_email(request, contract))
     return redirect('contract_detail', code=contract.code)
 
 
@@ -541,7 +542,8 @@ def buyer_confirm_receipt(request, code):
     except TransitionError:
         pass
     else:
-        notify_event('receipt_confirmed', contract)
+        notify_event('receipt_confirmed', contract,
+                     actor=get_contract_verified_email(request, contract))
         if not SettlementVault.objects.filter(contract=contract).exists():
             notify_event('bank_details_needed', contract)
     return redirect('contract_detail', code=contract.code)
@@ -573,7 +575,8 @@ def buyer_raise_dispute(request, code):
     except TransitionError:
         pass
     else:
-        notify_event('disputed', contract)
+        notify_event('disputed', contract,
+                     actor=get_contract_verified_email(request, contract))
     messages.info(
         request,
         "The dispute has been raised. Funds are held until our team reviews the escrow.",
@@ -592,7 +595,8 @@ def seller_raise_dispute(request, code):
     except TransitionError:
         pass
     else:
-        notify_event('disputed', contract)
+        notify_event('disputed', contract,
+                     actor=get_contract_verified_email(request, contract))
     messages.info(
         request,
         "The dispute has been raised. Funds are held until our team reviews the escrow.",

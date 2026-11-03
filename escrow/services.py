@@ -425,7 +425,7 @@ def complete_counterparty_join(code, actor_email):
     except TransitionError:
         return None, "This escrow could not be joined right now."
     audit('counterparty.joined', actor=actor, escrow=contract)
-    notify_event('counterparty_joined', contract)
+    notify_event('counterparty_joined', contract, actor=actor)
     return contract, ''
 
 

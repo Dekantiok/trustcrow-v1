@@ -7,9 +7,9 @@ Bare 6-digit messages go to OTP consumption, never to the model.
 import logging
 
 from django.core.cache import cache
-from django.http import JsonResponse
+from django.http import HttpResponse, JsonResponse
 from django.shortcuts import render
-from django.views.decorators.http import require_POST
+from django.views.decorators.http import require_GET, require_POST
 
 from agent.loop import (
     OTP_MESSAGE_RE,
@@ -67,11 +67,13 @@ def _thread_context(conversation, request):
         clear_proposal(conversation)
         conversation.refresh_from_db()
         pending = {}
+    messages = list(conversation.messages.order_by('id'))
     return {
-        'messages': list(conversation.messages.order_by('id')),
+        'messages': messages,
         'pending': pending if pending.get('tool') else None,
         'owner_email': conversation.owner_email,
         'pending_email': request.session.get('chat_pending_email', ''),
+        'last_message_id': messages[-1].id if messages else 0,
     }
 
 
@@ -542,3 +544,22 @@ def chat_new(request):
         request, 'agent/_thread.html',
         _thread_context(conversation, request),
     )
+
+
+@require_GET
+def chat_poll(request):
+    """Live updates for an open chat page (polled every ~10s).
+
+    Returns 204 when nothing new arrived so the page stays untouched;
+    otherwise the re-rendered thread. Never restarts the conversation —
+    that only happens on a full page load.
+    """
+    conversation = _conversation(request)
+    context = _thread_context(conversation, request)
+    try:
+        since = int(request.GET.get('since') or 0)
+    except (TypeError, ValueError):
+        since = 0
+    if since and context['last_message_id'] <= since:
+        return HttpResponse(status=204)
+    return render(request, 'agent/_thread.html', context)

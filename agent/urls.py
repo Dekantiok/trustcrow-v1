@@ -12,4 +12,5 @@ urlpatterns = [
     path('voice/', views.chat_voice, name='chat_voice'),
     path('transcribe/', views.transcribe_field, name='transcribe_field'),
     path('new/', views.chat_new, name='chat_new'),
+    path('poll/', views.chat_poll, name='chat_poll'),
 ]

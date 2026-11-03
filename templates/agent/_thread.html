@@ -1,5 +1,5 @@
 {# Chat thread: messages plus the pending-confirmation panel. #}
-<div id="chat-thread" class="d-flex flex-column gap-2 mb-3" style="max-height: 55vh; overflow-y: auto;">
+<div id="chat-thread" class="d-flex flex-column gap-2 mb-3" style="max-height: 55vh; overflow-y: auto;" data-last-id="{{ last_message_id|default:0 }}">
     {% for message in messages %}
         {% if message.role == 'user' %}
             <div class="d-flex justify-content-end">

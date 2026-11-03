@@ -334,6 +334,32 @@
     mic.addEventListener('pointercancel', cancelHold);
   }
 
+  /* Poll for updates pushed into this conversation (e.g. the other
+     party shipped, funded, or released) and swap them in live. */
+  function initChatPoll() {
+    var result = document.getElementById('chat-result');
+    if (!result || !document.getElementById('chat-form')) return;
+    if (result.dataset.pollAttached) return;
+    result.dataset.pollAttached = '1';
+    setInterval(function () {
+      if (document.hidden) return;
+      var thread = document.getElementById('chat-thread');
+      if (!thread) return;
+      var since = thread.getAttribute('data-last-id') || '0';
+      fetch('/assistant/poll/?since=' + encodeURIComponent(since), {
+        headers: { 'X-Requested-With': 'XMLHttpRequest' },
+      }).then(function (resp) {
+        if (resp.status === 204) return null;
+        return resp.text();
+      }).then(function (html) {
+        if (!html) return;
+        result.innerHTML = html;
+        var fresh = document.getElementById('chat-thread');
+        if (fresh) fresh.scrollTop = fresh.scrollHeight;
+      }).catch(function () {});
+    }, 10000);
+  }
+
   window.TrustcrowVoice = {
     supported: supported,
     recordOnce: recordOnce,
@@ -344,11 +370,13 @@
     showTyping: showTyping,
     hideTyping: hideTyping,
     appendUserBubble: appendUserBubble,
+    initChatPoll: initChatPoll,
   };
 
   document.addEventListener('DOMContentLoaded', function () {
     initFieldMics();
     initChatMic();
     initChatIndicators();
+    initChatPoll();
   });
 })();

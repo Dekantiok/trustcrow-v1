@@ -219,7 +219,8 @@ class ReleaseBankGateTest(TestCase):
                              actor_email='buyer@x.com')
         self.assertFalse(result['ok'])
         self.assertIn('bank', result['error'].lower())
-        mock_notify.assert_called_once_with('bank_details_needed', contract)
+        mock_notify.assert_called_once_with(
+            'bank_details_needed', contract, actor='buyer@x.com')
         contract.refresh_from_db()
         self.assertEqual(contract.status, 'in_inspection')
 
@@ -397,3 +398,49 @@ class BankVerificationRealLookupTest(TestCase):
             result = bv.verify_bank_account('8105885425', '999992')
         self.assertTrue(result['status'])
         mock_get.assert_not_called()
+
+class WebchatPushTest(TestCase):
+    def _web_convo(self, email):
+        from agent.loop import get_or_create_conversation
+        convo = get_or_create_conversation('web', f'push-{email}')
+        convo.owner_email = email
+        convo.save(update_fields=['owner_email'])
+        return convo
+
+    def test_bank_needed_lands_in_seller_webchat(self):
+        from escrow.lifecycle import notify_event
+        seller_convo = self._web_convo('seller@x.com')
+        contract = make_contract(code='TRSTpush1', status='in_inspection')
+        sent = notify_event('bank_details_needed', contract, actor='buyer@x.com')
+        self.assertGreaterEqual(sent, 1)
+        contents = [m.content for m in seller_convo.messages.all()]
+        self.assertTrue(any('bank' in c.lower() for c in contents), contents)
+
+    def test_actor_own_chat_not_duplicated(self):
+        from escrow.lifecycle import notify_event
+        buyer_convo = self._web_convo('buyer@x.com')
+        seller_convo = self._web_convo('seller@x.com')
+        contract = make_contract(code='TRSTpush2', status='in_inspection')
+        notify_event('receipt_confirmed', contract, actor='buyer@x.com')
+        self.assertEqual(buyer_convo.messages.count(), 0)
+        self.assertEqual(seller_convo.messages.count(), 1)
+
+    def test_no_webchat_is_silent(self):
+        from escrow.lifecycle import notify_event
+        contract = make_contract(code='TRSTpush3', status='in_inspection')
+        self.assertEqual(
+            notify_event('bank_details_needed', contract, actor='buyer@x.com'), 0)
+
+    def test_poll_returns_new_then_204(self):
+        self.client.get('/assistant/')
+        from agent.models import AIConversation
+        convo = AIConversation.objects.get(channel='web')
+        convo.messages.create(role='assistant', content='Seller shipped it!')
+        response = self.client.get('/assistant/poll/?since=0')
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'Seller shipped it!')
+        last_id = convo.messages.order_by('-id').first().id
+        response = self.client.get(f'/assistant/poll/?since={last_id}')
+        self.assertEqual(response.status_code, 204)
+        convo.refresh_from_db()
+        self.assertEqual(convo.messages.count(), 1)
