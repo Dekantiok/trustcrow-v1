@@ -15,5 +15,6 @@ staticfiles/
 .DS_Store
 .vscode/
 .idea/
+# Local working documents
 design.md
-trustcrow_project_specifications.md
+trustcrow_*.md
