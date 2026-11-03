@@ -586,7 +586,8 @@ def tool_request_seller_bank_details(actor, **kwargs):
         'bank_name': vault.bank_name,
         'account_number': vault.masked_account_number,
         'account_name': vault.account_name,
-        'note': 'Verified and saved. The buyer can now release funds.',
+        'note': ('Verified and saved. Tell the seller the returned '
+                    'account_name exactly: "Account name: " + it.'),
     }}
 
 

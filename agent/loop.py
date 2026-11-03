@@ -68,7 +68,9 @@ missing thing per message, most important first.
   ask then too. Do not wait until release is attempted. \
   Ask for bank name + 10-digit account number, match the name with \
   get_bank_list, confirm the exact account, then call \
-  request_seller_bank_details — the backend verifies the name.
+  request_seller_bank_details — the backend verifies the name. \
+  After saving, always state the account name the backend returned \
+  ("Account name: ...") so the seller can confirm it's theirs. \
   RELEASE: buyer confirms in inspection -> request_release_approval. \
   If bank details are missing the seller is notified automatically; \
   say so and wait. After release, confirm payout to both parties.
@@ -354,8 +356,9 @@ def _direct_reply(name, outcome):
         if data.get('already_saved'):
             return (f"Payout account already saved: {data.get('bank_name')} "
                     f"{data.get('account_number')} ({data.get('account_name')}).")
-        return (f"Verified and saved: {data.get('bank_name')} "
-                f"{data.get('account_number')} ({data.get('account_name')}). "
+        return (f"Verified and saved. Account name: "
+                f"{data.get('account_name')} — {data.get('bank_name')} "
+                f"{data.get('account_number')}. "
                 "The buyer can now release the funds.")
     if name == 'request_dispute_submission':
         return ("Dispute raised — funds are frozen until it's resolved. "

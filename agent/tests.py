@@ -598,3 +598,12 @@ class ChatViewTest(TestCase):
             reply = run_turn(convo, 'Yes, raise it now.')
             mock_chat.assert_not_called()
         self.assertIn('Dispute raised', reply)
+
+    def test_bank_save_reply_states_account_name(self):
+        from agent.loop import _direct_reply
+        reply = _direct_reply('request_seller_bank_details', {
+            'ok': True, 'data': {
+                'bank_name': 'OPay Digital Services',
+                'account_number': '******5425',
+                'account_name': 'FELIX KANTIOK'}})
+        self.assertIn('Account name: FELIX KANTIOK', reply)
