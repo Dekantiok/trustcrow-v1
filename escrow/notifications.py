@@ -9,6 +9,10 @@ DEFAULT_TIMEOUT = 15
 
 
 def send_otp_via_termii(email, otp_code):
+    if getattr(settings, 'DEMO_MODE', False):
+        logger.warning("DEMO MODE: OTP for %s not emailed (demo code applies)", email)
+        return True
+
     if settings.DEBUG and not getattr(settings, 'TERMII_SEND_IN_DEBUG', False):
         # Local mock: pretend delivery succeeded so flows can be exercised
         # without spending Termii credit. Nothing is emailed here, set

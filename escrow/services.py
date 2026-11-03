@@ -167,6 +167,19 @@ def consume_otp(email, submitted_code, intent):
     if not submitted_code:
         return OtpResult(OtpResult.INVALID)
 
+    if (getattr(settings, 'DEMO_MODE', False)
+            and submitted_code == getattr(settings, 'DEMO_OTP_CODE', '123456')):
+        record = (
+            AuthOTP.objects.filter(email=email, intent=intent, is_used=False)
+            .order_by('-id')
+            .first()
+        )
+        if record is not None:
+            record.is_used = True
+            record.save(update_fields=['is_used'])
+        logger.warning("DEMO MODE: universal code accepted for %s (%s)", email, intent)
+        return OtpResult(OtpResult.SUCCESS, record)
+
     record = (
         AuthOTP.objects.filter(email=email, intent=intent, is_used=False)
         .order_by('-id')

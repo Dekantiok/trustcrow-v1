@@ -75,6 +75,7 @@ TEMPLATES = [
                 'django.template.context_processors.request',
                 'django.contrib.auth.context_processors.auth',
                 'django.contrib.messages.context_processors.messages',
+                'config.context_processors.demo_mode',
             ],
         },
     },
@@ -171,6 +172,12 @@ EMAIL_HOST_PASSWORD = os.environ.get('EMAIL_HOST_PASSWORD', '')
 EMAIL_USE_TLS = os.environ.get('EMAIL_USE_TLS', 'True') == 'True'
 DEFAULT_FROM_EMAIL = os.environ.get(
     'DEFAULT_FROM_EMAIL', 'Trustcrow <no-reply@trustcrow.example>')
+
+# Demo mode for judging/testing: Termii OTP delivery is stubbed (the
+# DEMO_OTP_CODE is accepted instead) and payments run through a simulated
+# gateway. AI, escrow logic, and everything else stay fully real.
+DEMO_MODE = os.environ.get('DEMO_MODE', 'False') == 'True'
+DEMO_OTP_CODE = os.environ.get('DEMO_OTP_CODE', '123456')
 
 PAYSTACK_SECRET_KEY = os.environ.get('PAYSTACK_SECRET_KEY', 'sk_test_dummy')
 TERMII_API_KEY = os.environ.get('TERMII_API_KEY', 'dummy_key')

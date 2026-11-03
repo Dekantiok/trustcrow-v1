@@ -1,8 +1,9 @@
 import datetime
 import logging
 
+from django.conf import settings
 from django.contrib import messages
-from django.http import HttpResponse, HttpResponseBadRequest, HttpResponseForbidden
+from django.http import Http404, HttpResponse, HttpResponseBadRequest, HttpResponseForbidden
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
 from django.utils.timezone import now
@@ -754,3 +755,19 @@ __all__ = [
     'add_verified_email', 'get_verified_emails', 'is_party',
     'get_contract_verified_email', 'set_contract_verified_email',
 ]
+
+
+def demo_pay_page(request, code):
+    """Simulated checkout, demo mode only. Confirming here runs the exact
+    same backend funding confirmation a verified Paystack webhook would."""
+    if not getattr(settings, 'DEMO_MODE', False):
+        raise Http404()
+    contract = get_object_or_404(EscrowContract, code=code)
+    confirmed = False
+    if request.method == 'POST' and contract.status == 'awaiting_funding':
+        confirmed = confirm_funding_payment(
+            contract, contract.total_charge_kobo, currency=contract.currency)
+        contract.refresh_from_db()
+    return render(request, 'escrow/demo_pay.html', {
+        'contract': contract, 'confirmed': confirmed,
+    })
