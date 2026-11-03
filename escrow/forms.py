@@ -50,11 +50,6 @@ class ContractCreationForm(forms.ModelForm):
         for name, ph in placeholders.items():
             if name in self.fields:
                 self.fields[name].widget.attrs.setdefault('placeholder', ph)
-        # Voice dictation shines on free-text fields: the shared voice.js
-        # attaches a mic button to anything carrying data-voice. Amounts and
-        # emails stay typed, STT mangles numbers and spelled-out addresses.
-        for name in ('title', 'description'):
-            self.fields[name].widget.attrs.setdefault('data-voice', '1')
 
     def clean_amount(self):
         amount = self.cleaned_data['amount']

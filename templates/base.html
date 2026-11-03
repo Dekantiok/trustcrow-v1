@@ -204,9 +204,10 @@
         .toast-msg { position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%); padding: 13px 24px; border-radius: 12px; font-size: 0.9rem; font-weight: 600; box-shadow: 0 12px 32px rgba(16,16,16,.18); z-index: 9999; color: #fff; }
 
         /* Voice mic buttons on fields + chat. */
-        .voice-mic-btn { border-radius: var(--radius-md); touch-action: none; user-select: none; -webkit-user-select: none; }
         .voice-hint { min-height: 1.2em; }
         #chat-mic { flex: none; }
+        .tc-icon { vertical-align: -0.125em; flex: none; }
+        .btn .tc-icon { pointer-events: none; }
 
         /* Typing indicator: three bouncing dots in an assistant bubble. */
         .typing-dots { display: inline-flex; align-items: center; gap: 6px; padding: 6px 2px; }

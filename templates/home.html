@@ -20,10 +20,10 @@
                     {% csrf_token %}
                     <input type="text" name="message" id="chat-input" class="form-control" placeholder="e.g. I want to sell my laptop for ₦250,000 to ada@example.com…" autocomplete="off" maxlength="2000">
                     <button type="button" id="chat-mic" class="btn btn-outline-dark-custom" aria-label="Record a voice note">
-                        <i class="bi bi-mic"></i>
+                        <svg class="tc-icon" aria-hidden="true" focusable="false" width="16" height="16" fill="currentColor" viewBox="0 0 16 16"><path d="M3.5 6.5A.5.5 0 0 1 4 7v1a4 4 0 0 0 8 0V7a.5.5 0 0 1 1 0v1a5 5 0 0 1-4.5 4.975V15h3a.5.5 0 0 1 0 1h-7a.5.5 0 0 1 0-1h3v-2.025A5 5 0 0 1 3 8V7a.5.5 0 0 1 .5-.5z"/><path d="M10 8a2 2 0 1 1-4 0V3a2 2 0 1 1 4 0v5zM8 0a3 3 0 0 0-3 3v5a3 3 0 0 0 6 0V3a3 3 0 0 0-3-3z"/></svg>
                     </button>
                     <button type="submit" class="btn btn-primary-custom" aria-label="Send">
-                        <i class="bi bi-send"></i>
+                        <svg class="tc-icon" aria-hidden="true" focusable="false" width="16" height="16" fill="currentColor" viewBox="0 0 16 16"><path d="M15.964.686a.5.5 0 0 0-.65-.65L.767 5.855H.766l-.452.18a.5.5 0 0 0-.082.887l.41.26.001.002 4.995 3.178 3.178 4.995.002.002.26.41a.5.5 0 0 0 .886-.083l6-15Zm-1.833 1.89L6.637 10.07l-.215-.338a.5.5 0 0 0-.154-.154l-.338-.215 7.494-7.494 1.178-.471-.47 1.178v.001z"/></svg>
                     </button>
                 </form>
                 <small id="chat-voice-hint" class="text-muted-custom d-block mt-1"></small>

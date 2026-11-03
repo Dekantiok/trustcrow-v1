@@ -89,7 +89,6 @@
     }).catch(onErr);
   }
 
-  /* Mic toggle button for text inputs/textareas with data-voice. */
   function fmtElapsed(ms) {
     var s = Math.floor(ms / 1000);
     return Math.floor(s / 60) + ':' + ('0' + (s % 60)).slice(-2);
@@ -155,98 +154,6 @@
     document.body.addEventListener('htmx:responseError', hideTyping);
   }
 
-  function attachFieldMic(field) {
-    if (field.dataset.voiceAttached) return;
-    field.dataset.voiceAttached = '1';
-    var btn = document.createElement('button');
-    btn.type = 'button';
-    btn.className = 'btn btn-sm btn-outline-dark-custom voice-mic-btn';
-    btn.title = 'Record a voice note to fill this field';
-    btn.setAttribute('aria-label', 'Record voice note for ' + (field.name || 'field'));
-    btn.innerHTML = '<i class="bi bi-mic"></i>';
-    btn.style.marginTop = '6px';
-    var stop = null;
-    var startedAt = 0;
-    var hint = document.createElement('small');
-    hint.className = 'text-muted-custom d-block mt-1 voice-hint';
-    btn.title = 'Hold to record a voice note';
-    btn.style.touchAction = 'none';
-    btn.addEventListener('contextmenu', function (e) { e.preventDefault(); });
-    function sendBlob(blob) {
-      stop = null;
-      postAudio(field.dataset.voiceUrl || '/assistant/transcribe/', blob, function (data) {
-        if (field.tagName === 'TEXTAREA' && field.value && data.transcript) field.value += ' ';
-        field.value += data.transcript || '';
-        field.dispatchEvent(new Event('input', { bubbles: true }));
-        btn.innerHTML = '<i class="bi bi-mic"></i>';
-        btn.disabled = false;
-        hint.textContent = '';
-      }, function (err) {
-        hint.textContent = (err && err.message) || 'Voice failed, please type.';
-        btn.innerHTML = '<i class="bi bi-mic"></i>';
-        btn.disabled = false;
-      });
-    }
-    btn.addEventListener('pointerdown', function (e) {
-      e.preventDefault();
-      if (stop || btn.disabled) return;
-      btn.innerHTML = '<i class="bi bi-stop-circle"></i>';
-      hint.innerHTML = '<span class="rec-dot"></span><span class="rec-time">0:00</span>, release to send';
-      btn.classList.add('mic-recording');
-      try { btn.setPointerCapture(e.pointerId); } catch (err) {}
-      startedAt = Date.now();
-      var tickField = function () {
-        var el = hint.querySelector('.rec-time');
-        if (el) el.textContent = fmtElapsed(Date.now() - startedAt);
-      };
-      var recTimerField = setInterval(tickField, 500);
-      var stopRecFieldUI = function () {
-        clearInterval(recTimerField);
-        btn.classList.remove('mic-recording');
-      };
-      stop = recordOnce(sendBlob, function () {
-        stop = null;
-        stopRecFieldUI();
-        btn.innerHTML = '<i class="bi bi-mic"></i>';
-        hint.textContent = 'Microphone unavailable.';
-      });
-      btn._stopRecUI = stopRecFieldUI;
-    });
-    function releaseToSend() {
-      if (!stop) return;
-      if (Date.now() - startedAt < 400) {
-        var s = stop; stop = null;
-        if (btn._stopRecUI) btn._stopRecUI();
-        s.cancel();
-        btn.innerHTML = '<i class="bi bi-mic"></i>';
-        hint.textContent = 'Hold the mic button while you speak.';
-        return;
-      }
-      var send = stop; stop = null;
-      if (btn._stopRecUI) btn._stopRecUI();
-      btn.innerHTML = '<i class="bi bi-hourglass-split"></i>';
-      btn.disabled = true;
-      hint.textContent = 'Transcribing…';
-      send();
-    }
-    function cancelHold() {
-      if (!stop) return;
-      var s = stop; stop = null;
-      if (btn._stopRecUI) btn._stopRecUI();
-      s.cancel();
-      btn.innerHTML = '<i class="bi bi-mic"></i>';
-      hint.textContent = 'Recording discarded — nothing was sent.';
-    }
-    btn.addEventListener('pointerup', releaseToSend);
-    btn.addEventListener('pointerleave', releaseToSend);
-    btn.addEventListener('pointercancel', cancelHold);
-    field.insertAdjacentElement('afterend', btn);
-    btn.insertAdjacentElement('afterend', hint);
-  }
-
-  function initFieldMics() {
-    document.querySelectorAll('input[data-voice], textarea[data-voice]').forEach(attachFieldMic);
-  }
 
   function initChatMic() {
     var mic = document.getElementById('chat-mic');
@@ -270,7 +177,7 @@
     function setIdle() {
       stop = null;
       stopRecUI();
-      mic.innerHTML = '<i class="bi bi-mic"></i>';
+      mic.innerHTML = '<svg class="tc-icon" aria-hidden="true" focusable="false" width="16" height="16" fill="currentColor" viewBox="0 0 16 16"><path d="M3.5 6.5A.5.5 0 0 1 4 7v1a4 4 0 0 0 8 0V7a.5.5 0 0 1 1 0v1a5 5 0 0 1-4.5 4.975V15h3a.5.5 0 0 1 0 1h-7a.5.5 0 0 1 0-1h3v-2.025A5 5 0 0 1 3 8V7a.5.5 0 0 1 .5-.5z"/><path d="M10 8a2 2 0 1 1-4 0V3a2 2 0 1 1 4 0v5zM8 0a3 3 0 0 0-3 3v5a3 3 0 0 0 6 0V3a3 3 0 0 0-3-3z"/></svg>';
       mic.disabled = false;
     }
     function uploadBlob(blob) {
@@ -303,7 +210,7 @@
       e.preventDefault();
       if (stop || mic.disabled) return;
       if (hint) hint.textContent = '';
-      mic.innerHTML = '<i class="bi bi-stop-circle"></i>';
+      mic.innerHTML = '<svg class="tc-icon" aria-hidden="true" focusable="false" width="16" height="16" fill="currentColor" viewBox="0 0 16 16"><path d="M8 15A7 7 0 1 1 8 1a7 7 0 0 1 0 14zm0 1A8 8 0 1 0 8 0a8 8 0 0 0 0 16z"/><path d="M11 8a3 3 0 1 1-6 0 3 3 0 0 1 6 0z"/></svg>';
       mic.classList.add('mic-recording');
       if (hint) hint.innerHTML = '<span class="rec-dot"></span><span class="rec-time">0:00</span>, release to send';
       try { mic.setPointerCapture(e.pointerId); } catch (err) {}
@@ -324,14 +231,14 @@
         var s = stop; stop = null;
         stopRecUI();
         s.cancel();
-        mic.innerHTML = '<i class="bi bi-mic"></i>';
+        mic.innerHTML = '<svg class="tc-icon" aria-hidden="true" focusable="false" width="16" height="16" fill="currentColor" viewBox="0 0 16 16"><path d="M3.5 6.5A.5.5 0 0 1 4 7v1a4 4 0 0 0 8 0V7a.5.5 0 0 1 1 0v1a5 5 0 0 1-4.5 4.975V15h3a.5.5 0 0 1 0 1h-7a.5.5 0 0 1 0-1h3v-2.025A5 5 0 0 1 3 8V7a.5.5 0 0 1 .5-.5z"/><path d="M10 8a2 2 0 1 1-4 0V3a2 2 0 1 1 4 0v5zM8 0a3 3 0 0 0-3 3v5a3 3 0 0 0 6 0V3a3 3 0 0 0-3-3z"/></svg>';
         if (hint) hint.textContent = 'Hold the mic button while you speak.';
         return;
       }
       var send = stop; stop = null;
       stopRecUI();
       mic.disabled = true;
-      mic.innerHTML = '<i class="bi bi-hourglass-split"></i>';
+      mic.innerHTML = '<svg class="tc-icon" aria-hidden="true" focusable="false" width="16" height="16" fill="currentColor" viewBox="0 0 16 16"><path d="M2 1.5a.5.5 0 0 1 .5-.5h11a.5.5 0 0 1 0 1h-1v1a4.5 4.5 0 0 1-2.557 4.06c-.29.139-.443.377-.443.704v3.535c0 .327.154.565.443.704A4.5 4.5 0 0 1 12.5 15v1h1a.5.5 0 0 1 0 1h-11a.5.5 0 1 1 0-1h1v-1a4.5 4.5 0 0 1 2.557-4.06c.29-.139.443-.377.443-.704V7.7c0-.327-.154-.565-.443-.704A4.5 4.5 0 0 1 3.5 3V2h-1a.5.5 0 0 1 0-1zm2.5 1v1a3.5 3.5 0 0 0 1.989 3.158c.533.256 1.011.79 1.011 1.491v3.702c0 .701-.478 1.235-1.011 1.491A3.5 3.5 0 0 0 4.5 15v1h7v-1a3.5 3.5 0 0 0-1.989-3.158C9.978 11.586 9.5 10.86 9.5 10.159V7.45c0-.701.478-1.235 1.011-1.491A3.5 3.5 0 0 0 11.5 3V2h-7z"/></svg>';
       if (hint) hint.textContent = '';
       showTyping();
       send();
@@ -341,7 +248,7 @@
       var s = stop; stop = null;
       stopRecUI();
       s.cancel();
-      mic.innerHTML = '<i class="bi bi-mic"></i>';
+      mic.innerHTML = '<svg class="tc-icon" aria-hidden="true" focusable="false" width="16" height="16" fill="currentColor" viewBox="0 0 16 16"><path d="M3.5 6.5A.5.5 0 0 1 4 7v1a4 4 0 0 0 8 0V7a.5.5 0 0 1 1 0v1a5 5 0 0 1-4.5 4.975V15h3a.5.5 0 0 1 0 1h-7a.5.5 0 0 1 0-1h3v-2.025A5 5 0 0 1 3 8V7a.5.5 0 0 1 .5-.5z"/><path d="M10 8a2 2 0 1 1-4 0V3a2 2 0 1 1 4 0v5zM8 0a3 3 0 0 0-3 3v5a3 3 0 0 0 6 0V3a3 3 0 0 0-3-3z"/></svg>';
       if (hint) hint.textContent = 'Recording discarded — nothing was sent.';
     }
     mic.addEventListener('pointerup', releaseToSend);
@@ -379,7 +286,6 @@
     supported: supported,
     recordOnce: recordOnce,
     postAudio: postAudio,
-    initFieldMics: initFieldMics,
     initChatMic: initChatMic,
     initChatIndicators: initChatIndicators,
     showTyping: showTyping,
@@ -389,7 +295,6 @@
   };
 
   document.addEventListener('DOMContentLoaded', function () {
-    initFieldMics();
     initChatMic();
     initChatIndicators();
     initChatPoll();
