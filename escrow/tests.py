@@ -251,6 +251,7 @@ class OtpTest(TestCase):
     DEBUG=False, TERMII_API_KEY='live_test_key',
     TERMII_EMAIL_CONFIG_ID='live_test_config',
 )
+@override_settings(DEMO_MODE=False)
 class TermiiPayloadTest(TestCase):
     """The emailed code must be the code the backend will accept.
 
@@ -373,14 +374,14 @@ class JoinEscrowTest(TestCase):
         response = self.client.post(
             reverse('join_escrow_page'), {'code': 'JOIN1', 'email': 'intruder@test.com'}
         )
-        self.assertContains(response, 'does not match the counterparty')
+        self.assertContains(response, 'could not be verified')
         self.assertEqual(AuthOTP.objects.count(), 0)
 
     def test_unknown_code_is_rejected(self):
         response = self.client.post(
             reverse('join_escrow_page'), {'code': 'NOPE', 'email': SELLER}
         )
-        self.assertContains(response, 'No escrow found')
+        self.assertContains(response, 'could not be verified')
 
     @patch('escrow.services.send_otp_via_termii', return_value=True)
     def test_cannot_join_twice(self, _mock):
@@ -838,6 +839,7 @@ class DisputeTest(TestCase):
             contract=self.contract, bank_name='Test Bank', bank_code='058',
             account_number='1234567890', account_name='Test Seller',
         )
+        self.contract.refresh_from_db()
         self.contract.transition_to('pending_payout')
         with patch('escrow.services.get_payment_gateway') as mock_gateway:
             mock_gateway.return_value.execute_seller_payout.return_value = {'status': True}
@@ -852,6 +854,7 @@ class DisputeTest(TestCase):
             contract=self.contract, bank_name='Test Bank', bank_code='058',
             account_number='1234567890', account_name='Test Seller',
         )
+        self.contract.refresh_from_db()
         self.contract.transition_to('pending_payout')
         with patch('escrow.services.get_payment_gateway') as mock_gateway:
             gateway = mock_gateway.return_value
@@ -863,6 +866,7 @@ class DisputeTest(TestCase):
 
     def test_dispute_can_be_cancelled(self):
         self.client.post(reverse('buyer_raise_dispute', kwargs={'code': 'DIS1'}))
+        self.contract.refresh_from_db()
         self.contract.transition_to('cancelled')
         self.contract.refresh_from_db()
         self.assertEqual(self.contract.status, 'cancelled')

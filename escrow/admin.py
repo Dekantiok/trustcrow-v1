@@ -15,7 +15,7 @@ from .models import (
     VerifiedContact,
     WebhookEvent,
 )
-from .services import confirm_funding_payment, settle_pending_payout
+from .services import confirm_funding_payment, initiate_refund, settle_pending_payout
 
 
 @admin.register(EscrowContract)
@@ -96,11 +96,14 @@ class EscrowContractAdmin(admin.ModelAdmin):
             contract.transition_to('cancelled')
             changed += 1
             if was_funded:
+                refund = initiate_refund(contract)
                 self.message_user(
                     request,
-                    f"{contract.code} was already funded: process a Paystack refund "
-                    f"for reference {contract.gateway_reference} if the buyer was charged.",
-                    level=messages.WARNING,
+                    f"{contract.code} was funded: refund {refund.status} "
+                    f"(record #{refund.id}). The escrow is not refunded "
+                    "until the provider confirms.",
+                    level=(messages.INFO if refund.status in ('initiated', 'success')
+                           else messages.ERROR),
                 )
         self.message_user(
             request, f"{verb} {changed} escrow(s).", level=messages.INFO

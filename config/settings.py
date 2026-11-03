@@ -178,6 +178,15 @@ DEFAULT_FROM_EMAIL = os.environ.get(
 # gateway. AI, escrow logic, and everything else stay fully real.
 DEMO_MODE = os.environ.get('DEMO_MODE', 'False') == 'True'
 DEMO_OTP_CODE = os.environ.get('DEMO_OTP_CODE', '123456')
+DEMO_ALLOW_PROD = os.environ.get('DEMO_ALLOW_PROD', 'False') == 'True'
+
+if not DEBUG and DEMO_MODE and not DEMO_ALLOW_PROD:
+    raise RuntimeError(
+        "DEMO_MODE is on with DJANGO_DEBUG off. Demo mode accepts a "
+        "universal OTP and simulates payments, so it must never run in "
+        "production by accident. Set DEMO_ALLOW_PROD=True only for an "
+        "intentional, isolated demo deployment."
+    )
 
 PAYSTACK_SECRET_KEY = os.environ.get('PAYSTACK_SECRET_KEY', 'sk_test_dummy')
 TERMII_API_KEY = os.environ.get('TERMII_API_KEY', 'dummy_key')

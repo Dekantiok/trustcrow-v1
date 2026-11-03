@@ -18,6 +18,7 @@ def _recipients(event, contract):
         'receipt_confirmed': [buyer, seller],
         'bank_details_needed': [seller],
         'payout_completed': [seller, buyer],
+        'payout_failed': [seller, buyer],
         'disputed': [buyer, seller],
     }.get(event, [])
 
@@ -48,6 +49,10 @@ def _copy(event, contract):
                 "something is wrong.")
     if event == 'payout_completed':
         return f"Escrow {code} is complete, the seller has been paid."
+    if event == 'payout_failed':
+        return (f"Update on escrow {code}: the payout transfer did not "
+                "complete. Funds remain held while our team reconciles "
+                "it. No action is needed from you right now.")
     if event == 'disputed':
         return (f"A dispute was raised on escrow {code}, funds are "
                 "frozen until it is resolved.")

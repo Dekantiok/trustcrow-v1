@@ -53,6 +53,9 @@ def verify_bank_account(account_number, bank_code):
         return {'status': False, 'error': 'Account number must be exactly 10 digits.'}
 
     if _secret() in ('', 'sk_test_dummy'):
+        if not settings.DEBUG and not getattr(settings, 'DEMO_MODE', False):
+            return {'status': False,
+                    'error': 'Payment gateway is not configured.'}
         # No real gateway key configured: canned answer so local flows
         # can be exercised offline. Never used when a key exists, the
         # resolver returns the actual account name even on test keys.

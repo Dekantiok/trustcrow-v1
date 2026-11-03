@@ -138,10 +138,18 @@ class EscrowContract(models.Model):
             raise TransitionError(
                 f"Cannot move contract {self.code} from {self.status} to {target}."
             )
+        # Single conditional UPDATE: if a concurrent request already
+        # moved this contract, this call loses cleanly instead of
+        # overwriting their state with a stale in-memory copy.
+        updated = type(self).objects.filter(
+            pk=self.pk, status=self.status).update(status=target, **fields)
+        if not updated:
+            raise TransitionError(
+                f"Cannot move contract {self.code} from {self.status} to {target}."
+            )
         for field, value in fields.items():
             setattr(self, field, value)
         self.status = target
-        self.save()
         return self
 
 

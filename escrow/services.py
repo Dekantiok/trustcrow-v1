@@ -215,6 +215,8 @@ class PayoutResult:
     def message(self):
         return {
             'missing_vault': "The seller has not added payout bank details yet.",
+            'invalid_amount': "The payout amount is not valid for this escrow.",
+            'payout_in_progress': "A payout is already in progress for this escrow.",
             'not_in_inspection': "This escrow is not awaiting a payout.",
             'not_awaiting_payout': "This escrow is not awaiting a payout.",
             'transfer_failed': "The bank transfer did not go through. Our team has been notified.",
@@ -301,40 +303,54 @@ def settle_pending_payout(contract):
         return PayoutResult(success=False, reason='not_awaiting_payout')
 
     amount = contract.seller_receives
+    if amount <= 0:
+        return PayoutResult(success=False, reason='invalid_amount')
+
+    # Claim before any external call: an initiated/success/uncertain
+    # payout row means a transfer is already in flight or needs human
+    # reconciliation, so a concurrent settle must never send another.
+    blocking = PayoutRecord.objects.filter(
+        escrow=contract, status__in=('initiated', 'success', 'uncertain'),
+    ).order_by('-id').first()
+    if blocking is not None:
+        return PayoutResult(success=False, reason='payout_in_progress')
+
+    claim = PayoutRecord.objects.create(
+        escrow=contract, amount=amount, currency=contract.currency,
+        status='initiated')
     try:
         result = get_payment_gateway().execute_seller_payout(vault, amount)
     except Exception:
         logger.exception("Payout raised for contract %s", contract.code)
         result = None
 
-    def record_payout(status):
-        raw = result if isinstance(result, dict) else {}
-        nested = raw.get('data')
-        nested = nested if isinstance(nested, dict) else {}
+    raw = result if isinstance(result, dict) else {}
+    nested = raw.get('data')
+    nested = nested if isinstance(nested, dict) else {}
 
-        def pick(*keys):
-            for key in keys:
-                for source in (raw, nested):
-                    value = source.get(key)
-                    if value not in (None, ''):
-                        return value
-            return None
+    def pick(*keys):
+        for key in keys:
+            for source in (raw, nested):
+                value = source.get(key)
+                if value not in (None, ''):
+                    return value
+        return None
 
-        return PayoutRecord.objects.create(
-            escrow=contract,
-            amount=amount,
-            currency=contract.currency,
-            recipient_code=pick('recipient_code', 'recipient'),
-            transfer_reference=pick('reference'),
-            provider_transfer_code=pick('transfer_code'),
-            status=status,
-            provider_response=raw if raw else {'error': 'gateway raised'},
-        )
+    def finish_payout(status):
+        claim.status = status
+        claim.recipient_code = pick('recipient_code', 'recipient')
+        claim.transfer_reference = pick('reference')
+        claim.provider_transfer_code = pick('transfer_code')
+        claim.provider_response = raw if raw else {'error': 'gateway raised'}
+        claim.save(update_fields=[
+            'status', 'recipient_code', 'transfer_reference',
+            'provider_transfer_code', 'provider_response'])
+        return claim
 
     if not _transfer_succeeded(result):
         logger.error("Payout failed for contract %s: %r", contract.code, result)
         contract.refresh_from_db()
-        record = record_payout(
+        record = finish_payout(
             'uncertain' if result is None else 'failed'
         )
         audit('payout.failed', escrow=contract, metadata={
@@ -343,10 +359,19 @@ def settle_pending_payout(contract):
         })
         return PayoutResult(success=False, reason='transfer_failed', detail=result)
 
+    nested_status = str(nested.get('status') or '').lower()
+    if nested_status and nested_status not in ('success', 'successful'):
+        # Provider accepted but has not settled (e.g. Paystack pending).
+        # Stay in pending_payout; the transfer webhook completes it.
+        record = finish_payout('initiated')
+        audit('payout.initiated', escrow=contract,
+              metadata={'payout_id': record.id})
+        return PayoutResult(success=True, reason='initiated', detail=result)
+
     EscrowContract.objects.filter(pk=contract.pk, status='pending_payout').update(status='completed')
     contract.refresh_from_db()
     logger.info("Payout complete for contract %s", contract.code)
-    record = record_payout('success')
+    record = finish_payout('success')
     audit('payout.completed', escrow=contract, metadata={'payout_id': record.id})
     notify_event('payout_completed', contract)
     return PayoutResult(success=True)
@@ -370,6 +395,52 @@ def release_escrow_funds(contract):
         return PayoutResult(success=False, reason='not_in_inspection')
 
     return settle_pending_payout(contract)
+
+
+def initiate_refund(contract):
+    """Start a provider refund for a funded escrow (explicit record).
+
+    A cancelled escrow is not refunded until the provider confirms, so
+    the record starts as requested and moves to initiated/failed from
+    the gateway response. Safe to call once per cancellation: an
+    existing active refund is returned instead of duplicated.
+    """
+    from .models import RefundRecord
+    existing = RefundRecord.objects.filter(
+        escrow=contract, status__in=('requested', 'initiated', 'success'),
+    ).order_by('-id').first()
+    if existing is not None:
+        return existing
+    payment = PaymentTransaction.objects.filter(
+        escrow=contract, status='success').order_by('-id').first()
+    record = RefundRecord.objects.create(
+        escrow=contract, payment=payment,
+        amount_kobo=contract.total_charge_kobo,
+        currency=contract.currency, status='requested')
+    try:
+        result = get_payment_gateway().refund_payment(
+            contract.gateway_reference, contract.total_charge_kobo)
+    except Exception:
+        logger.exception("Refund raised for contract %s", contract.code)
+        result = None
+    raw = result if isinstance(result, dict) else {}
+    nested = raw.get('data') if isinstance(raw.get('data'), dict) else {}
+    if raw.get('status'):
+        record.status = 'initiated'
+        record.provider_reference = (
+            nested.get('reference') or nested.get('id')
+            or raw.get('reference') or contract.gateway_reference)
+        record.provider_response = raw
+        record.save(update_fields=['status', 'provider_reference', 'provider_response'])
+        audit('refund.initiated', escrow=contract,
+              metadata={'refund_id': record.id})
+    else:
+        record.status = 'failed'
+        record.provider_response = raw if raw else {'error': 'gateway raised'}
+        record.save(update_fields=['status', 'provider_response'])
+        audit('refund.failed', escrow=contract,
+              metadata={'refund_id': record.id})
+    return record
 
 
 def auto_release_expired_inspections(dry_run=False):

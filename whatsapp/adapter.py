@@ -23,8 +23,11 @@ def verify_signature(raw_body, signature_header):
     """
     secret = getattr(settings, 'WHATSAPP_APP_SECRET', '')
     if not secret:
-        logger.warning("WHATSAPP_APP_SECRET unset, skipping signature check")
-        return True
+        if getattr(settings, 'DEBUG', False):
+            logger.warning("WHATSAPP_APP_SECRET unset, skipping check in DEBUG")
+            return True
+        logger.error("WHATSAPP_APP_SECRET unset, rejecting webhook")
+        return False
     if not signature_header or not signature_header.startswith('sha256='):
         return False
     expected = hmac.new(secret.encode(), raw_body or b'', hashlib.sha256).hexdigest()

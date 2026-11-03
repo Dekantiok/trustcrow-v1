@@ -84,6 +84,15 @@ class ContractCreationForm(forms.ModelForm):
             raise ValidationError(
                 "The creator and counterparty cannot use the same email address."
             )
+        amount = cleaned_data.get('amount')
+        if amount is not None and cleaned_data.get('fee_payer') == 'seller':
+            from .services import calculate_service_fee
+            if amount <= calculate_service_fee(amount):
+                raise ValidationError(
+                    "The amount is too small for the seller to pay the "
+                    "service fee. Increase the amount or let the buyer "
+                    "pay the fee."
+                )
         return cleaned_data
 
 

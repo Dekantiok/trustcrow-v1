@@ -15,7 +15,13 @@ from .forms import ContractCreationForm, SettlementVaultForm
 from .gateways import get_payment_gateway
 from .invitations import send_counterparty_invitation
 from .lifecycle import notify_event
-from .models import EscrowContract, SettlementVault, TransitionError, WebhookEvent
+from .models import (
+    EscrowContract,
+    PayoutRecord,
+    SettlementVault,
+    TransitionError,
+    WebhookEvent,
+)
 from .services import (
     calculate_service_fee,
     confirm_funding_payment,
@@ -153,12 +159,15 @@ def join_escrow_page(request):
         code = request.POST.get('code', '').strip()
         email = normalize_email(request.POST.get('email', ''))
         contract = EscrowContract.objects.filter(code=code).first()
-        if contract is None:
-            error_message = "No escrow found with that code."
+        if contract is None or email != contract.counterparty_email:
+            # One indistinct answer: never reveal whether the code
+            # exists or which email it is linked to.
+            error_message = (
+                "That code and email could not be verified. "
+                "Check both and try again."
+            )
         elif contract.status != 'awaiting_counterparty':
             error_message = "This escrow is not currently accepting counterparty verification."
-        elif email != contract.counterparty_email:
-            error_message = "The email does not match the counterparty linked to this escrow."
         elif issue_otp(email, 'join') is None:
             error_message = (
                 "We could not send a verification code right now. "
@@ -420,6 +429,47 @@ def payment_callback(request, code):
     return redirect('contract_detail', code=contract.code)
 
 
+def _handle_transfer_event(event, data):
+    """Apply a Paystack transfer outcome to its payout record.
+
+    A transfer is only complete when the provider says so here (or the
+    create response already settled). Failed/reversed transfers leave
+    the escrow in pending_payout for ops reconciliation, never completed.
+    """
+    from django.db.models import Q
+
+    from .services import audit
+    transfer_code = data.get('transfer_code') or ''
+    reference = data.get('reference') or ''
+    payout = PayoutRecord.objects.filter(
+        Q(provider_transfer_code=transfer_code) | Q(transfer_reference=reference)
+    ).order_by('-id').first() if (transfer_code or reference) else None
+    if payout is None:
+        logger.warning("Transfer event %s for unknown payout %s", event, reference)
+        return
+    contract = payout.escrow
+    if event == 'transfer.success':
+        if payout.status != 'success':
+            payout.status = 'success'
+            payout.save(update_fields=['status'])
+        moved = EscrowContract.objects.filter(
+            pk=contract.pk, status='pending_payout').update(status='completed')
+        if moved:
+            contract.refresh_from_db()
+            audit('payout.completed', escrow=contract,
+                  metadata={'payout_id': payout.id, 'via': 'transfer_webhook'})
+            notify_event('payout_completed', contract)
+    elif event in ('transfer.failed', 'transfer.reversed'):
+        payout.status = 'failed'
+        payout.save(update_fields=['status'])
+        audit('payout.failed', escrow=contract,
+              metadata={'payout_id': payout.id, 'via': 'transfer_webhook',
+                        'event': event})
+        notify_event('payout_failed', contract)
+        logger.error("Transfer %s for escrow %s (payout %s)",
+                     event, contract.code, payout.id)
+
+
 @csrf_exempt
 def paystack_webhook(request):
     if request.method != 'POST':
@@ -459,6 +509,11 @@ def paystack_webhook(request):
         recorded.processed_at = now()
         recorded.save(update_fields=['processed', 'processed_at'])
 
+    if event and event.startswith('transfer.'):
+        _handle_transfer_event(event, data)
+        mark_processed()
+        return HttpResponse("Webhook received", status=200)
+
     if event != 'charge.success' or not reference:
         logger.info("Ignoring Paystack event %s for reference %s", event, reference)
         mark_processed()
@@ -483,7 +538,12 @@ def paystack_webhook(request):
     # Must equal what initialize_vault_payment charged: amount + fee when
     # the buyer is the fee payer, else amount alone.
     expected_kobo = contract.total_charge_kobo
-    if amount_kobo is not None and int(amount_kobo) != expected_kobo:
+    try:
+        paid_kobo = int(amount_kobo) if amount_kobo is not None else None
+    except (TypeError, ValueError):
+        logger.error("Unusable amount %r on %s", amount_kobo, contract.code)
+        return HttpResponse("Amount mismatch", status=400)
+    if paid_kobo is not None and paid_kobo != expected_kobo:
         logger.error(
             "Amount mismatch on %s: got %s expected %s",
             contract.code, amount_kobo, expected_kobo,
