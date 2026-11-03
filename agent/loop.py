@@ -269,16 +269,24 @@ def _abandon_session_drafts(conversation):
     ).update(status='abandoned')
 
 
-def _maybe_auto_propose_creation(conversation, actor, session_key):
-    """Park a creation proposal when a complete draft is on the table.
+def _maybe_auto_propose_creation(conversation, actor, session_key,
+                                   draft_touched_this_turn):
+    """Park a creation proposal when this turn built a complete draft.
 
     The model sometimes presents terms in prose without calling the
     creation tool; without a recorded proposal the user's "yes" then
     hits the gate cold and they are asked to confirm twice. Recording
     the proposal at end-of-turn (never mid-turn, so it cannot execute
     in the same turn it was made) means one confirmation always lands.
+
+    Only fires when the model actually created or updated a draft this
+    turn. Parking any complete draft ever seen would clobber a live
+    proposal for another action (e.g. a dispatch confirmation), and the
+    next "yes" would then execute the wrong thing — a stray escrow.
     """
     if (conversation.pending_action or {}).get('tool'):
+        return
+    if not draft_touched_this_turn:
         return
     from escrow.models import EscrowDraft
     qs = EscrowDraft.objects.filter(status__in=('draft', 'proposed'))
@@ -492,6 +500,7 @@ def run_turn(conversation, user_text, base_url='', session_key=''):
             # of echoing dead arguments into another gated round-trip.
             clear_proposal(conversation)
     max_iterations = getattr(settings, 'AGENT_MAX_ITERATIONS', 8)
+    draft_touched_this_turn = False
 
     try:
         for _ in range(max_iterations):
@@ -509,7 +518,8 @@ def run_turn(conversation, user_text, base_url='', session_key=''):
                 content=assistant_text,
             )
             if not calls:
-                _maybe_auto_propose_creation(conversation, actor, session_key)
+                _maybe_auto_propose_creation(
+                    conversation, actor, session_key, draft_touched_this_turn)
                 return assistant_text or DEGRADED_REPLY
 
             model_messages.append({
@@ -524,6 +534,8 @@ def run_turn(conversation, user_text, base_url='', session_key=''):
             })
             for call in calls:
                 name, arguments = call['name'], call['arguments']
+                if name in ('create_escrow_draft', 'update_escrow_draft'):
+                    draft_touched_this_turn = True
                 ConversationMessage.objects.create(
                     conversation=conversation,
                     role='assistant',

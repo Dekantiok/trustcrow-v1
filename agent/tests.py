@@ -512,19 +512,49 @@ class ChatViewTest(TestCase):
         convo = get_or_create_conversation('web', 'sess-auto-convo')
         convo.owner_email = 'buyer@example.com'
         convo.save(update_fields=['owner_email'])
-        EscrowDraft.objects.create(
+        draft = EscrowDraft.objects.create(
             owner_email='buyer@example.com', owner_session='sess-auto',
+            title='Laptop', description='Laptop', amount=Decimal('50000'),
+            fee_payer='buyer', creator_role='buyer',
+            counterparty_email='seller@example.com', inspection_days=3)
+        update_call = {
+            'id': 'u1', 'name': 'update_escrow_draft',
+            'arguments': {'draft_id': draft.id, 'title': 'Laptop'},
+        }
+        with patch('agent.loop.chat', side_effect=[
+                {'text': '', 'tool_calls': [update_call], 'usage': {}},
+                {'text': 'Here are the terms, confirm?', 'tool_calls': [],
+                 'usage': {}},
+        ]):
+            run_turn(convo, 'looks good', session_key='sess-auto')
+        convo.refresh_from_db()
+        pending = convo.pending_action or {}
+        self.assertEqual(pending.get('tool'), 'request_escrow_creation')
+        self.assertEqual((pending.get('arguments') or {}).get('draft_id'), draft.id)
+
+    def test_prose_only_turn_does_not_auto_propose(self):
+        # A turn that merely talks about a deal must never park a
+        # creation proposal: a later "yes" meant for another action
+        # (e.g. confirming dispatch) would otherwise execute it and
+        # create a stray escrow.
+        from decimal import Decimal
+        from escrow.models import EscrowDraft
+        from agent.loop import run_turn
+        from agent.loop import get_or_create_conversation
+        convo = get_or_create_conversation('web', 'sess-auto-convo2')
+        convo.owner_email = 'buyer@example.com'
+        convo.save(update_fields=['owner_email'])
+        EscrowDraft.objects.create(
+            owner_email='buyer@example.com', owner_session='sess-auto2',
             title='Laptop', description='Laptop', amount=Decimal('50000'),
             fee_payer='buyer', creator_role='buyer',
             counterparty_email='seller@example.com', inspection_days=3)
         with patch('agent.loop.chat', return_value={
                 'text': 'Here are the terms, confirm?', 'tool_calls': [],
                 'usage': {}}):
-            run_turn(convo, 'looks good', session_key='sess-auto')
+            run_turn(convo, 'looks good', session_key='sess-auto2')
         convo.refresh_from_db()
-        pending = convo.pending_action or {}
-        self.assertEqual(pending.get('tool'), 'request_escrow_creation')
-        self.assertIn('draft_id', pending.get('arguments') or {})
+        self.assertEqual(convo.pending_action, {})
 
     def test_incomplete_draft_does_not_auto_propose(self):
         from escrow.models import EscrowDraft
