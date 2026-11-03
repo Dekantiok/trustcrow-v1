@@ -6,7 +6,7 @@ from unittest.mock import patch
 from django.test import TestCase, override_settings
 
 from escrow.forms import ContractCreationForm
-from escrow.models import EscrowContract, PayoutRecord, RefundRecord, SettlementVault
+from escrow.models import AuthOTP, EscrowContract, PayoutRecord, RefundRecord, SettlementVault
 from escrow.services import initiate_refund, settle_pending_payout
 
 
@@ -149,3 +149,41 @@ class HealthCheckTest(TestCase):
         response = self.client.get('/healthz')
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json(), {'ok': True})
+
+
+class OtpRaceTest(TestCase):
+    def test_wrong_code_burns_exactly_one_attempt(self):
+        from escrow.services import issue_otp, consume_otp
+        with patch('escrow.services.send_otp_via_termii', return_value=True):
+            issue_otp('race@x.com', 'reauth')
+        for _ in range(2):
+            result = consume_otp('race@x.com', '000000', 'reauth')
+            self.assertFalse(result.ok)
+        record = AuthOTP.objects.get(email='race@x.com', intent='reauth')
+        self.assertEqual(record.attempts_left, 3)
+
+    def test_expired_code_does_not_burn_attempts(self):
+        from datetime import timedelta
+        from django.utils import timezone
+        from escrow.services import issue_otp, consume_otp
+        with patch('escrow.services.send_otp_via_termii', return_value=True) as mock_send:
+            issue_otp('race2@x.com', 'reauth')
+            real_code = mock_send.call_args[0][1]
+        record = AuthOTP.objects.get(email='race2@x.com', intent='reauth')
+        record.expires_at = timezone.now() - timedelta(seconds=1)
+        record.save(update_fields=['expires_at'])
+        result = consume_otp('race2@x.com', real_code, 'reauth')
+        self.assertEqual(result.outcome, 'expired')
+        record.refresh_from_db()
+        self.assertEqual(record.attempts_left, 5)
+
+    def test_second_consumer_loses_race(self):
+        from escrow.services import issue_otp, consume_otp
+        with patch('escrow.services.send_otp_via_termii', return_value=True) as mock_send:
+            issue_otp('race3@x.com', 'reauth')
+            real_code = mock_send.call_args[0][1]
+        # Two sessions verify the same code "at once": first wins,
+        # second finds nothing live rather than reusing the code.
+        self.assertTrue(consume_otp('race3@x.com', real_code, 'reauth').ok)
+        retry = consume_otp('race3@x.com', real_code, 'reauth')
+        self.assertFalse(retry.ok)

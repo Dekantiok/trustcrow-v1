@@ -161,6 +161,9 @@ class OtpResult:
 def consume_otp(email, submitted_code, intent):
     """
     Validate a submitted code; attempts burn even on mismatch.
+
+    The decrement and the final consume are conditional UPDATEs so
+    concurrent guesses cannot overspend the 5-attempt budget.
     """
     email = normalize_email(email)
     submitted_code = (submitted_code or '').strip()
@@ -189,19 +192,31 @@ def consume_otp(email, submitted_code, intent):
         return OtpResult(OtpResult.INVALID)
 
     if not record.check_code(submitted_code):
-        record.attempts_left = max(0, record.attempts_left - 1)
-        record.save(update_fields=['attempts_left'])
-        outcome = OtpResult.EXHAUSTED if record.attempts_left == 0 else OtpResult.INVALID
-        return OtpResult(outcome, record)
+        burned = AuthOTP.objects.filter(
+            pk=record.pk, attempts_left__gt=0,
+        ).update(attempts_left=max(0, record.attempts_left - 1))
+        left = record.attempts_left - burned
+        if left <= 0:
+            return OtpResult(OtpResult.EXHAUSTED, record)
+        return OtpResult(OtpResult.INVALID, record)
 
+    # Only burn an attempt after a correct code: expired or replaced
+    # codes reject without consuming tries.
     if record.is_expired:
         return OtpResult(OtpResult.EXPIRED, record)
 
     if record.attempts_left <= 0:
         return OtpResult(OtpResult.EXHAUSTED, record)
 
+    claimed = AuthOTP.objects.filter(
+        pk=record.pk, is_used=False, attempts_left__gt=0,
+    ).update(is_used=True)
+    if not claimed:
+        record.refresh_from_db()
+        if record.attempts_left <= 0:
+            return OtpResult(OtpResult.EXHAUSTED, record)
+        return OtpResult(OtpResult.INVALID, record)
     record.is_used = True
-    record.save(update_fields=['is_used'])
     return OtpResult(OtpResult.SUCCESS, record)
 
 

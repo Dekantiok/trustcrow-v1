@@ -197,7 +197,7 @@ Copy `.env.example` → `.env`. Never commit `.env`.
 | `DJANGO_SECRET_KEY` | prod only | dev fallback | Must be set when `DJANGO_DEBUG=False` |
 | `DJANGO_DEBUG` |, | `False` | Set `True` locally. SQLite is used when `True` |
 | `DJANGO_ALLOWED_HOSTS` | prod only | `127.0.0.1,localhost` | Comma-separated |
-| `DATABASE_URL` | prod only |, | Postgres URL (Neon/Render). `ssl_require=True` |
+| `DATABASE_URL` | prod only |, | Postgres URL (Neon/Render). `ssl_require=True`. Required: without it the app has no production database configured |
 | `DEMO_MODE` | judges | `False` | `True` stubs Termii OTP delivery and Paystack payments. AI and escrow logic stay real |
 | `DEMO_OTP_CODE` | judges | `123456` | Universal verification code accepted only while `DEMO_MODE=True` |
 | `PAYSTACK_SECRET_KEY` | yes | `sk_test_dummy` | `sk_test_…` for testing, `sk_live_…` for live |
@@ -207,8 +207,10 @@ Copy `.env.example` → `.env`. Never commit `.env`.
 | `BASETEN_API_KEY` | for AI chat |, | Chat model inference key |
 | `BASETEN_BASE_URL` |, | `https://inference.baseten.co/v1` | OpenAI-compatible endpoint |
 | `BASETEN_MODEL` |, | `meta-models/muse-spark-open-1026` | Verified against project account |
-| `AGENT_MAX_ITERATIONS` |, | `8` | Tool-call cap per chat turn |
+| `AGENT_MAX_ITERATIONS` |, | `8` | Tool-call cap per chat turn. Keep `Procfile` web `timeout` above the worst case (`AGENT_REQUEST_TIMEOUT` + transcribe + Paystack) |
 | `AGENT_REQUEST_TIMEOUT` |, | `60` | Seconds per inference call |
+| `CACHE_BACKEND` / `CACHE_LOCATION` |, | locmem | Swap for Redis etc. in multi-worker deploys; sessions stay database-backed |
+| `SESSION_ENGINE` |, | db sessions | Override only if you know sessions will follow it |
 | `MODEL_API_KEY` | for voice |, | Meta Model API key (Muse transcribe; ~$0.18/hr audio) |
 | `ASR_BASE_URL` |, | `https://api.meta.ai` | Transcription endpoint |
 | `ASR_MODEL` |, | `muse-voice-transcribe-1.0` | STT model |
@@ -288,10 +290,10 @@ Browser mic / WhatsApp audio → `voice/transcriber.py`: ffmpeg (pip-bundled bin
 
 ## Deployment (Render + Neon style)
 
-1. Set `DJANGO_DEBUG=False`, `DJANGO_SECRET_KEY`, `DJANGO_ALLOWED_HOSTS`, `DATABASE_URL`, `CSRF_TRUSTED_ORIGINS`, Paystack/Termii/Model/WhatsApp keys, SMTP.
+1. Set `DJANGO_DEBUG=False`, `DJANGO_SECRET_KEY`, `DJANGO_ALLOWED_HOSTS`, `DATABASE_URL`, `CSRF_TRUSTED_ORIGINS`, Paystack/Termii/Model/WhatsApp keys, SMTP. The app refuses to boot with a fallback secret, default hosts, a dummy Paystack key, missing `EMAIL_HOST`, or `DEMO_MODE` on.
 2. Build: `pip install -r requirements.txt && python manage.py collectstatic --noinput && python manage.py migrate`
-3. Start: `gunicorn config.wsgi:application`
-4. Worker: `python manage.py auto_release_escrow` (cron or Render worker)
+3. Start: `gunicorn config.wsgi:application --bind 0.0.0.0:$PORT --workers 3 --timeout 90` (timeout must cover the slowest chat turn plus voice transcription)
+4. Scheduler, not a persistent worker: run `python manage.py auto_release_escrow` from cron/beat on a schedule (the `Procfile` worker entry documents the one-shot command; a long-lived dyno running it would just exit)
 5. Register webhooks: Paystack dashboard → `/webhooks/paystack/`; Meta dashboard → `/webhooks/whatsapp/` (+ verify token).
 6. Run the test-mode end-to-end (create → join → test card → dispatch → receipt → release) before going live.
 7. Prod enforces `Secure` cookies, HSTS (1yr), `SECURE_PROXY_SSL_HEADER`, `X-Frame-Options: DENY`.
@@ -300,6 +302,7 @@ Browser mic / WhatsApp audio → `voice/transcriber.py`: ffmpeg (pip-bundled bin
 
 - No passwords, OTP-gated sessions expire after `SESSION_COOKIE_AGE` (default 24h); OTPs hashed, short-lived, attempt-limited, cooldown-guarded, single-use.
 - WhatsApp numbers are endpoints, not identity; verified email is the actor everywhere.
+- Security headers ship by default: `X-Frame-Options: DENY`, nosniff, same-origin referrer, microphone-only permissions policy, and a Content-Security-Policy covering self, jsDelivr, and Google Fonts.
 - Webhook signatures validated (Paystack, WhatsApp); duplicate events ignored via unique constraints.
 - Amount + currency verified on every funding confirmation; payouts idempotent with `uncertain` parking (never blind-retry a timeout).
 - Post-funding cancel requires ops refund check (see admin warning in `escrow/models.py`).

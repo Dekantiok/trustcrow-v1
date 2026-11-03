@@ -38,6 +38,8 @@ if DEBUG:
 if not DEBUG and ALLOWED_HOSTS == ['127.0.0.1', 'localhost']:
     raise RuntimeError("DJANGO_ALLOWED_HOSTS must be set when DJANGO_DEBUG is off.")
 
+# --- Security headers --------------------------------------------------------
+
 INSTALLED_APPS = [
     'django.contrib.admin',
     'django.contrib.auth',
@@ -51,8 +53,39 @@ INSTALLED_APPS = [
     'whatsapp',
 ]
 
+# Content-Security-Policy values are plain tuples because the inline
+# styles/scripts predate nonces; tightening to nonces comes with the
+# frontend build step, not before it.
+CONTENT_SECURITY_POLICY = {
+    'DIRECTIVES': {
+        'default-src': ("'self'",),
+        'connect-src': ("'self'", 'https://cdn.jsdelivr.net',
+                        'https://fonts.googleapis.com'),
+        'font-src': ("'self'", 'https://fonts.gstatic.com', 'data:'),
+        'img-src': ("'self'", 'data:'),
+        'script-src': ("'self'", 'https://cdn.jsdelivr.net'),
+        'style-src': ("'self'", "'unsafe-inline'",
+                      'https://cdn.jsdelivr.net', 'https://fonts.googleapis.com'),
+    },
+}
+
+def _permissions_policy(get_response):
+    """Permissions-Policy header (mic only, self only).
+
+    Django has no setting for it, so this tiny middleware sets it
+    explicitly rather than leaving the header absent.
+    """
+    def middleware(request):
+        response = get_response(request)
+        response['Permissions-Policy'] = 'microphone=(self), camera=()'
+        return response
+    return middleware
+
+
 MIDDLEWARE = [
     'django.middleware.security.SecurityMiddleware',
+    'csp.middleware.CSPMiddleware',
+    'config.settings._permissions_policy',
     'whitenoise.middleware.WhiteNoiseMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
     'django.middleware.common.CommonMiddleware',
@@ -103,8 +136,12 @@ else:
 
 CACHES = {
     'default': {
-        'BACKEND': 'django.core.cache.backends.locmem.LocMemCache',
-        'LOCATION': 'trustcrow',
+        # Single-process local cache. OTP cooldowns, voice throttling, and
+        # bank lists fragment across workers by design; SESSION_ENGINE below
+        # stays database-backed so logins do not.
+        'BACKEND': os.environ.get(
+            'CACHE_BACKEND', 'django.core.cache.backends.locmem.LocMemCache'),
+        'LOCATION': os.environ.get('CACHE_LOCATION', 'trustcrow'),
     }
 }
 
@@ -170,6 +207,11 @@ EMAIL_PORT = int(os.environ.get('EMAIL_PORT', '587'))
 EMAIL_HOST_USER = os.environ.get('EMAIL_HOST_USER', '')
 EMAIL_HOST_PASSWORD = os.environ.get('EMAIL_HOST_PASSWORD', '')
 EMAIL_USE_TLS = os.environ.get('EMAIL_USE_TLS', 'True') == 'True'
+if not DEBUG and EMAIL_BACKEND.endswith('smtp.EmailBackend') and not EMAIL_HOST:
+    raise RuntimeError(
+        "EMAIL_HOST must be set when DJANGO_DEBUG is off: invitation "
+        "emails are required for counterparty onboarding."
+    )
 DEFAULT_FROM_EMAIL = os.environ.get(
     'DEFAULT_FROM_EMAIL', 'Trustcrow <no-reply@trustcrow.example>')
 
@@ -187,6 +229,15 @@ if not DEBUG and DEMO_MODE and not DEMO_ALLOW_PROD:
         "production by accident. Set DEMO_ALLOW_PROD=True only for an "
         "intentional, isolated demo deployment."
     )
+
+if not DEBUG and PAYSTACK_SECRET_KEY in ('', 'sk_test_dummy'):
+    raise RuntimeError(
+        "PAYSTACK_SECRET_KEY must be set when DJANGO_DEBUG is off: the "
+        "default key would silently mark payout accounts as verified."
+    )
+
+SESSION_ENGINE = os.environ.get(
+    'SESSION_ENGINE', 'django.contrib.sessions.backends.db')
 
 PAYSTACK_SECRET_KEY = os.environ.get('PAYSTACK_SECRET_KEY', 'sk_test_dummy')
 TERMII_API_KEY = os.environ.get('TERMII_API_KEY', 'dummy_key')
@@ -254,6 +305,7 @@ if not DEBUG:
     # forced to HTTPS for months and the decision is hard to walk back.
     SECURE_HSTS_PRELOAD = os.environ.get('SECURE_HSTS_PRELOAD', 'False') == 'True'
     SECURE_CONTENT_TYPE_NOSNIFF = True
+    SECURE_REFERRER_POLICY = 'same-origin'
     SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
     X_FRAME_OPTIONS = 'DENY'
     CSRF_TRUSTED_ORIGINS = [
