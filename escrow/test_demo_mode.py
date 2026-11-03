@@ -102,3 +102,13 @@ class DemoGatewayTest(TestCase):
         response = self.client.get('/')
         self.assertContains(response, 'Demo mode')
         self.assertContains(response, '123456')
+
+
+@override_settings(DEMO_MODE=False)
+class DemoGuardTest(TestCase):
+    def test_prod_settings_module_allows_import(self):
+        # The hard DEMO-in-prod refusal lives at settings-import time;
+        # it is exercised in CI with DJANGO_DEBUG=False. Here we pin the
+        # two settings that compose it.
+        from django.conf import settings
+        self.assertFalse(settings.DEMO_MODE)

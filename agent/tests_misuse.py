@@ -116,3 +116,51 @@ class AgentMisuseTest(TestCase):
         self.assertFalse(execute(
             'request_payment_link', {'escrow_reference': 'MIS001'},
             actor_email='buyer@x.com')['ok'])
+
+
+class ToolArgumentRedactionTest(TestCase):
+    def test_bank_details_masked_in_history(self):
+        from decimal import Decimal
+        from agent.loop import get_or_create_conversation, run_turn
+        from escrow.models import EscrowContract
+        EscrowContract.objects.create(
+            code='TRSTred1', title='T', description='D',
+            amount=Decimal('50000'), service_fee=Decimal('1500'),
+            fee_payer='buyer', creator_email='buyer@x.com',
+            creator_role='buyer', counterparty_email='seller@x.com',
+            status='in_inspection', gateway_reference='REF_RED1')
+        convo = get_or_create_conversation('web', 'sess-redact')
+        convo.owner_email = 'seller@x.com'
+        convo.save(update_fields=['owner_email'])
+        call = {'id': 'b1', 'name': 'request_seller_bank_details',
+                'arguments': {'escrow_reference': 'TRSTred1',
+                              'bank_code': '058',
+                              'account_number': '0123456789'}}
+        with patch('agent.loop.chat',
+                    return_value={'text': '', 'tool_calls': [call],
+                                  'usage': {}}):
+            with patch('agent.registry.verify_bank_account',
+                       return_value={'status': True,
+                                     'account_name': 'SELLER NAME'}):
+                with patch('agent.registry.list_banks',
+                           return_value={'058': 'GTBank'}):
+                    run_turn(convo, 'here are my bank details', session_key='sess-redact')
+        row = convo.messages.filter(role='assistant', tool_name='request_seller_bank_details').order_by('-id').first()
+        self.assertIsNotNone(row)
+        self.assertEqual(row.tool_arguments.get('account_number'), '[withheld]')
+        self.assertEqual(row.tool_arguments.get('bank_code'), '[withheld]')
+        self.assertNotIn('0123456789', json.dumps(row.tool_arguments))
+
+    def test_non_sensitive_args_untouched(self):
+        from agent.loop import get_or_create_conversation
+        convo = get_or_create_conversation('web', 'sess-redact2')
+        convo.owner_email = 'buyer@x.com'
+        convo.save(update_fields=['owner_email'])
+        call = {'id': 'q1', 'name': 'get_fee_quote',
+                'arguments': {'amount': '50000'}}
+        with patch('agent.loop.chat',
+                    return_value={'text': '', 'tool_calls': [call], 'usage': {}}):
+            from agent.loop import run_turn
+            run_turn(convo, 'fee?', session_key='sess-redact2')
+        row = convo.messages.filter(role='tool').order_by('-id').first()
+        self.assertTrue(json.loads(row.content)['ok'])

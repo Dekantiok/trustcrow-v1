@@ -122,6 +122,9 @@ def transcribe_audio(audio_bytes, timeout=None):
     """Full pipeline: convert then transcribe. Returns transcript string."""
     wav_bytes = convert_to_wav(audio_bytes)
     payload = transcribe_wav(wav_bytes, timeout=timeout)
+    if not isinstance(payload, dict):
+        raise VoiceTranscriptionError(
+            "Transcription returned something unreadable.")
     transcript = (payload.get('transcript') or '').strip()
     if not transcript:
         raise VoiceTranscriptionError(

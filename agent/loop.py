@@ -390,7 +390,8 @@ def _try_direct_confirmation(conversation, user_text, actor, base_url, session_k
     clear_proposal(conversation)
     ConversationMessage.objects.create(
         conversation=conversation, role='assistant', content='',
-        tool_name=name, tool_arguments=arguments)
+        tool_name=name,
+        tool_arguments=_redact_tool_arguments(name, arguments))
     outcome = execute(name, arguments, actor_email=actor,
                       base_url=base_url, session_key=session_key,
                       conversation=conversation)
@@ -420,12 +421,36 @@ def confirmed(conversation, name, arguments):
     return _proposal_matches(pending, name, arguments) and _proposal_fresh(pending)
 
 
+SENSITIVE_ARG_KEYS = {'account_number', 'bank_code', 'code', 'otp', 'password'}
+
+SENSITIVE_TOOL_ARGS = {
+    'request_seller_bank_details': {'account_number'},
+    'create_escrow_draft': set(),
+    'update_escrow_draft': set(),
+    'get_escrow_draft': set(),
+}
+
+
+def _redact_tool_arguments(name, arguments):
+    """Persist tool arguments with secrets masked.
+
+    WhatsApp threads live indefinitely and bank details already flowed
+    through chat rows once. Masking here keeps history/audit safe while
+    leaving every live value usable in the same turn it was captured.
+    """
+    arguments = dict(arguments or {})
+    sensitive = set(SENSITIVE_ARG_KEYS) | SENSITIVE_TOOL_ARGS.get(name, set())
+    for key in list(arguments.keys()):
+        if key in sensitive or 'otp' in key.lower() or 'code' in key.lower():
+            arguments[key] = '[withheld]'
+    return arguments
+
+
 def _history_messages(conversation, limit=20):
     """Replayable history: plain user/assistant turns only.
 
-    Tool calls and results are internal reasoning, not conversation, they
-    are re-driven by the model each turn, never replayed, so nothing can
-    be re-executed from history and no call ids need persisting.
+    Tool calls and results are internal reasoning, never replayed, so
+    nothing can be re-executed from history and no call ids need persisting.
     """
     rows = conversation.messages.order_by('-id')[:limit]
     history = []
@@ -504,7 +529,7 @@ def run_turn(conversation, user_text, base_url='', session_key=''):
                     role='assistant',
                     content='',
                     tool_name=name,
-                    tool_arguments=arguments,
+                    tool_arguments=_redact_tool_arguments(name, arguments),
                 )
                 if name in CONSEQUENTIAL_TOOLS and not confirmed(
                     conversation, name, arguments

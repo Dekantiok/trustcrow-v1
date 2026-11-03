@@ -142,3 +142,10 @@ class FailClosedTest(TestCase):
                                PAYSTACK_SECRET_KEY='sk_test_dummy'):
             result = verify_bank_account('0123456789', '058')
         self.assertFalse(result['status'])
+
+
+class HealthCheckTest(TestCase):
+    def test_healthz_ok(self):
+        response = self.client.get('/healthz')
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json(), {'ok': True})

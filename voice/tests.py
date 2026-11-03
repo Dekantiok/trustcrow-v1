@@ -241,3 +241,12 @@ class WhatsAppVoiceTest(TestCase):
         self.assertEqual(response.status_code, 200)
         mock_dl.assert_called_once_with('media-1')
         mock_tr.assert_called_once_with(b'ogg')
+
+    def test_non_dict_payload_raises_friendly_error(self):
+        from unittest.mock import MagicMock
+        from voice.transcriber import transcribe_audio
+        fake_wav = make_wav()
+        with patch('voice.transcriber.convert_to_wav', return_value=fake_wav), \
+             patch('voice.transcriber.transcribe_wav', return_value=['not', 'a', 'dict']):
+            with self.assertRaises(VoiceTranscriptionError):
+                transcribe_audio(b'x' * 100)

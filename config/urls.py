@@ -1,6 +1,12 @@
 from django.contrib import admin
+from django.http import JsonResponse
 from django.urls import include, path
 from escrow import views
+
+
+def healthz(request):
+    del request
+    return JsonResponse({'ok': True})
 
 urlpatterns = [
     path('admin/', admin.site.urls),
@@ -26,4 +32,5 @@ urlpatterns = [
     path('assistant/', include('agent.urls')),
     path('webhooks/whatsapp/', include('whatsapp.urls')),
     path('demo/pay/<str:code>/', views.demo_pay_page, name='demo_pay'),
+    path('healthz', healthz, name='health'),
 ]

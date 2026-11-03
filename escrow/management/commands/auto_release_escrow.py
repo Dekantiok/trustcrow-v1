@@ -4,7 +4,11 @@ from escrow.services import auto_release_expired_inspections
 
 
 class Command(BaseCommand):
-    help = "Release escrows whose inspection window has elapsed without buyer action."
+    help = (
+        "Release escrows whose inspection window has elapsed without buyer "
+        "action. Designed to run on a schedule (cron/beat), NOT as a "
+        "persistent worker: each invocation does one sweep and exits."
+    )
 
     def add_arguments(self, parser):
         parser.add_argument(
