@@ -361,7 +361,9 @@ class ResumeEitherPartyTest(TestCase):
         with patch('agent.registry.verify_bank_account',
                    return_value={'status': True, 'account_name': 'FELIX K'}), \
              patch('agent.registry.list_banks',
-                   return_value={'999992': 'OPay Digital Services'}):
+                   return_value={'999992': 'OPay Digital Services'}), \
+             patch('agent.registry.get_bank_name',
+                   return_value='OPay Digital Services'):
             result = execute(
                 'request_seller_bank_details',
                 {'escrow_reference': contract.code, 'bank_code': 999992,
