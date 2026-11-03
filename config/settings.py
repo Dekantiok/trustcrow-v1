@@ -83,7 +83,7 @@ TEMPLATES = [
 WSGI_APPLICATION = 'config.wsgi.application'
 
 # SQLite locally; Neon Postgres (via DATABASE_URL) when deployed with
-# DEBUG off — e.g. Render. Keeps the single-node override for good measure.
+# DEBUG off, e.g. Render. Keeps the single-node override for good measure.
 if DEBUG:
     DATABASES = {
         'default': {
@@ -223,7 +223,7 @@ LOG_OTP_TO_CONSOLE = os.environ.get('LOG_OTP_TO_CONSOLE', 'False') == 'True'
 # Deliver real Termii emails while DEBUG is on. The notifications module
 # otherwise short-circuits to a mock in DEBUG (returns True without sending),
 # which is why a correct TERMII_API_KEY still sends nothing locally. Turn this
-# on only for live local testing — every OTP then costs a real Termii credit.
+# on only for live local testing, every OTP then costs a real Termii credit.
 TERMII_SEND_IN_DEBUG = os.environ.get('TERMII_SEND_IN_DEBUG', 'False') == 'True'
 
 # --- Security / deployment ---------------------------------------------------

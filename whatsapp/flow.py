@@ -44,7 +44,7 @@ CODE_SENT_TEMPLATE = (
     "I sent a 6-digit code to {email}. Please reply with the code here."
 )
 VERIFIED_TEMPLATE = (
-    "Verified — I can now help with escrows for {email}. "
+    "Verified, I can now help with escrows for {email}. "
     "Describe the deal and I'll guide you through it."
 )
 NO_CODE_PENDING = (
@@ -52,7 +52,7 @@ NO_CODE_PENDING = (
     "Reply with your email address and I'll send you a fresh code."
 )
 CREATED_TEMPLATE = (
-    "Verified — your escrow {code} is created. The counterparty has been "
+    "Verified, your escrow {code} is created. The counterparty has been "
     "invited by email to review and accept the terms."
 )
 NEED_EMAIL_FIRST = (
@@ -128,13 +128,13 @@ def _try_resume_creation(conversation, link, wa_id, code, base_url=''):
         'inspection_days': draft.inspection_days,
     })
     if not form.is_valid():
-        reply = "The draft is missing something — tell me the full deal terms and we'll fix it together."
+        reply = "The draft is missing something, tell me the full deal terms and we'll fix it together."
         conversation.messages.create(role='assistant', content=reply)
         return reply
     contract = create_escrow_from_validated(form.cleaned_data)
     draft.status = 'converted'
     draft.save(update_fields=['status'])
-    # The creator email was just proven by the consumed code — advance past
+    # The creator email was just proven by the consumed code, advance past
     # pending_verification so the counterparty can join.
     confirmed_fields = {}
     if email == contract.buyer_email:
@@ -172,10 +172,10 @@ def _join_reply_after_verify(conversation, email):
         return f"You're verified, but I can't continue that escrow: {error}"
     audit(f'counterparty.{kind}_via_whatsapp', actor=email, escrow=contract)
     if kind == 'joined':
-        return (f"Verified and joined — escrow {contract.code}. "
+        return (f"Verified and joined, escrow {contract.code}. "
                 + escrow_next_step(contract, email))
     role = 'buyer' if email == contract.buyer_email else 'seller'
-    return (f"Verified — welcome back. You're the {role} on escrow "
+    return (f"Verified, welcome back. You're the {role} on escrow "
             f"{contract.code}, currently {contract.status}. "
             + escrow_next_step(contract, email))
 

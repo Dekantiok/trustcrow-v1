@@ -1,6 +1,6 @@
 """Website AI assistant: chat UI over the shared agent loop.
 
-No upfront verification — anyone can start talking. Confirming a draft
+No upfront verification, anyone can start talking. Confirming a draft
 sends a code to the creator email; pasting it back resumes creation.
 Bare 6-digit messages go to OTP consumption, never to the model.
 """
@@ -96,17 +96,17 @@ def _complete_pending_join(conversation, email):
     role = 'buyer' if email == contract.buyer_email else 'seller'
     audit(f'counterparty.{kind}_via_chat', actor=email, escrow=contract)
     if kind == 'joined':
-        return (f"Verified and joined — escrow {contract.code} "
+        return (f"Verified and joined, escrow {contract.code} "
                 f"({contract.title}, {contract.amount} {contract.currency}). "
                 + escrow_next_step(contract, email))
-    return (f"Verified — welcome back. You're the {role} on escrow "
+    return (f"Verified, welcome back. You're the {role} on escrow "
             f"{contract.code} ({contract.title}, {contract.amount} "
             f"{contract.currency}), currently {contract.status}. "
             + escrow_next_step(contract, email))
 
 
 def _is_discard_command(text):
-    """A typed 'discard it' drops the awaiting proposal — no model needed."""
+    """A typed 'discard it' drops the awaiting proposal, no model needed."""
     import re
     return bool(re.match(
         r'^\s*(discard( (it|that|this))?|disregard( (it|that|this))?|'
@@ -258,7 +258,7 @@ def _try_resume_creation_with_code(request, conversation, text):
     if not form.is_valid():
         conversation.messages.create(
             role='assistant',
-            content=("The draft is missing something — "
+            content=("The draft is missing something, "
                      "tell me the full deal terms and we'll fix it together."),
         )
         return render(
@@ -268,8 +268,8 @@ def _try_resume_creation_with_code(request, conversation, text):
     contract = create_escrow_from_validated(form.cleaned_data)
     draft.status = 'converted'
     draft.save(update_fields=['status'])
-    # The creator email was just proven by the consumed code — same as the
-    # manual /verify/ page — so advance past pending_verification now.
+    # The creator email was just proven by the consumed code, same as the
+    # manual /verify/ page, so advance past pending_verification now.
     # Without this the counterparty join form refuses the escrow.
     confirmed_fields = {}
     if email == contract.buyer_email:
@@ -291,7 +291,7 @@ def _try_resume_creation_with_code(request, conversation, text):
     conversation.messages.create(
         role='assistant',
         content=(
-            f"Verified — your escrow {contract.code} is created. "
+            f"Verified, your escrow {contract.code} is created. "
             "Share the code with the other party so they can join and verify; "
             "I'll help track funding and delivery from here."
         ),
@@ -317,7 +317,7 @@ def chat_send(request):
         conversation.messages.create(role='user', content=text)
         conversation.messages.create(
             role='assistant',
-            content="Discarded — nothing was done. Tell me what you would like instead.",
+            content="Discarded, nothing was done. Tell me what you would like instead.",
         )
         return render(
             request, 'agent/_thread.html',
@@ -353,7 +353,7 @@ def chat_send(request):
                 )
             conversation.messages.create(
                 role='assistant',
-                content=(f"Verified — I can now help with escrows for "
+                content=(f"Verified, I can now help with escrows for "
                          f"{agent_pending}. What would you like to do?"),
             )
         else:
@@ -377,7 +377,7 @@ def chat_send(request):
             conversation = _conversation(request)
             conversation.messages.create(
                 role='assistant',
-                content=(f"Verified — I can now help with escrows for "
+                content=(f"Verified, I can now help with escrows for "
                          f"{pending_email}. What would you like to do?"),
             )
             audit('chat.verified', actor=pending_email)
@@ -406,7 +406,7 @@ def chat_dismiss(request):
     clear_proposal(conversation)
     conversation.messages.create(
         role='assistant',
-        content="Discarded — nothing was done. Tell me what you would like instead.",
+        content="Discarded, nothing was done. Tell me what you would like instead.",
     )
     return render(
         request, 'agent/_thread.html',
@@ -451,7 +451,7 @@ def chat_voice(request):
     if _voice_throttled(request):
         conversation.messages.create(
             role='assistant',
-            content="You've used a lot of voice notes this hour — please type for a bit.",
+            content="You've used a lot of voice notes this hour, please type for a bit.",
         )
         return render(
             request, 'agent/_thread.html',
@@ -493,7 +493,7 @@ def chat_voice(request):
                 conversation.messages.create(
                     role='assistant',
                     content=join_reply or (
-                        f"Verified — I can now help with escrows for "
+                        f"Verified, I can now help with escrows for "
                         f"{agent_pending}. What would you like to do?"))
             else:
                 conversation.messages.create(
@@ -551,7 +551,7 @@ def chat_poll(request):
     """Live updates for an open chat page (polled every ~10s).
 
     Returns 204 when nothing new arrived so the page stays untouched;
-    otherwise the re-rendered thread. Never restarts the conversation —
+    otherwise the re-rendered thread. Never restarts the conversation -
     that only happens on a full page load.
     """
     conversation = _conversation(request)

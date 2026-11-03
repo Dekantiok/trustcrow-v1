@@ -120,7 +120,7 @@
   }
 
   /* Sent message appears instantly, typing dots below it, input cleared
-     for the follow-up — the server swap then replaces the whole thread. */
+     for the follow-up, the server swap then replaces the whole thread. */
   function initChatIndicators() {
     if (!window.htmx) return;
     document.body.addEventListener('htmx:beforeRequest', function (event) {
@@ -170,7 +170,7 @@
         btn.disabled = false;
         hint.textContent = '';
       }, function (err) {
-        hint.textContent = (err && err.message) || 'Voice failed — please type.';
+        hint.textContent = (err && err.message) || 'Voice failed, please type.';
         btn.innerHTML = '<i class="bi bi-mic"></i>';
         btn.disabled = false;
       });
@@ -179,7 +179,7 @@
       e.preventDefault();
       if (stop || btn.disabled) return;
       btn.innerHTML = '<i class="bi bi-stop-circle"></i>';
-      hint.innerHTML = '<span class="rec-dot"></span><span class="rec-time">0:00</span> — release to send';
+      hint.innerHTML = '<span class="rec-dot"></span><span class="rec-time">0:00</span>, release to send';
       btn.classList.add('mic-recording');
       try { btn.setPointerCapture(e.pointerId); } catch (err) {}
       startedAt = Date.now();
@@ -282,7 +282,7 @@
         setIdle();
       }).then(function () { hideTyping(); }).catch(function () {
         hideTyping();
-        if (hint) hint.textContent = 'Voice failed — please type instead.';
+        if (hint) hint.textContent = 'Voice failed, please type instead.';
         setIdle();
       });
     }
@@ -292,7 +292,7 @@
       if (hint) hint.textContent = '';
       mic.innerHTML = '<i class="bi bi-stop-circle"></i>';
       mic.classList.add('mic-recording');
-      if (hint) hint.innerHTML = '<span class="rec-dot"></span><span class="rec-time">0:00</span> — release to send';
+      if (hint) hint.innerHTML = '<span class="rec-dot"></span><span class="rec-time">0:00</span>, release to send';
       try { mic.setPointerCapture(e.pointerId); } catch (err) {}
       startedAt = Date.now();
       var tickChat = function () {

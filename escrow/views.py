@@ -209,7 +209,7 @@ def _verify_and_advance(request, contract, intent, next_status, email):
     if not result.ok:
         return None, result.message
     # The inbox was just proven by OTP: record which side verified. The
-    # status tool and dashboard read these flags — without them a joined
+    # status tool and dashboard read these flags, without them a joined
     # counterparty still looks "unverified".
     confirmed_fields = {}
     if email == contract.buyer_email:
@@ -378,7 +378,7 @@ def payment_callback(request, code):
     Browser return leg from Paystack Checkout.
 
     Webhooks are the primary confirmation, but they never arrive when the
-    webhook URL isn't configured or reachable on the gateway dashboard —
+    webhook URL isn't configured or reachable on the gateway dashboard -
     which used to leave escrows stuck on "confirming payment" forever. As a
     fallback, verify OUR stored reference directly with Paystack before
     showing that message. The browser's query string is never trusted and
@@ -618,7 +618,7 @@ def cancel_escrow(request, code):
     if contract.status not in EscrowContract.PRE_FUNDING_STATUSES:
         messages.error(
             request,
-            "This escrow is already funded. Cancellation now requires a refund — "
+            "This escrow is already funded. Cancellation now requires a refund, "
             "please contact support so our team can review it.",
         )
         return redirect('contract_detail', code=contract.code)

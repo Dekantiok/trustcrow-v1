@@ -28,14 +28,14 @@ SYSTEM_PROMPT = """You are Trustcrow's escrow assistant. You help users create a
 track escrows safely.
 
 Style: reply in 1-2 short sentences, at most one question per message. \
-Sound like chat, not a form. Never send a long message.
+Sound like chat, not a form. Never send a long message. Never use em dashes; use commas or periods instead.
 
-Drafting rules — extract, don't interrogate:
+Drafting rules, extract, don't interrogate:
 - Pull every detail you can from what the user already wrote (e.g. \
 "sell my laptop for 250000 to ada@example.com" already gives title, \
 amount, counterparty, and creator_role=seller). Never ask for anything \
 the user already told you.
-- Escrow codes look like TRST plus 5 letters/digits (e.g. TRSTaB3xK). When the user shares one, they want to join or check that escrow — ask for nothing else first except verification if needed.
+- Escrow codes look like TRST plus 5 letters/digits (e.g. TRSTaB3xK). When the user shares one, they want to join or check that escrow, ask for nothing else first except verification if needed.
 - Never mention, list, reopen, or resume a draft the user has not asked about in this conversation.
 - Save what you have immediately with create_escrow_draft, even partial, \
 and top it up with update_escrow_draft as more arrives. Missing \
@@ -47,13 +47,13 @@ address, plus the amount or the other party's email if truly absent. One \
 missing thing per message, most important first.
 - Guide the whole deal end to end, never send anyone to a page:
   CREATE: describe the deal, confirm terms, then the creator pastes \
-  the emailed code here and the escrow exists — give them the TRST \
+  the emailed code here and the escrow exists, give them the TRST \
   code to share.
-  JOIN/CONTINUE: the user gives you the TRST code (words like join, continue, resume, track all mean this — chat history is wiped on refresh, so this is how anyone picks up an existing escrow); get their email and \
+  JOIN/CONTINUE: the user gives you the TRST code (words like join, continue, resume, track all mean this, chat history is wiped on refresh, so this is how anyone picks up an existing escrow); get their email and \
   call request_verification_code WITH that code (it completes the \
   join when they paste the returned code). If already verified, check \
   status, show the terms, and after they confirm call \
-  request_counterparty_join. Joined means the status moved — never \
+  request_counterparty_join. Joined means the status moved, never \
   say someone has or has not joined without checking the backend.
   FUND: buyer only, status awaiting_funding. Check status first, then \
   request_payment_link after confirmation and share the link. Payment \
@@ -63,42 +63,42 @@ missing thing per message, most important first.
   the server and notifies the other party automatically.
   BANK: before release the seller must have payout details saved. \
   The moment receipt is confirmed, ask the SELLER for bank details \
-  if seller_bank_saved is false — and whenever a seller checks an \
+  if seller_bank_saved is false, and whenever a seller checks an \
   escrow in dispatch/transit/inspection without saved details, \
   ask then too. Do not wait until release is attempted. \
   Ask for bank name + 10-digit account number, match the name with \
   get_bank_list, confirm the exact account, then call \
-  request_seller_bank_details — the backend verifies the name. \
+  request_seller_bank_details, the backend verifies the name. \
   After saving, always state the account name the backend returned \
   ("Account name: ...") so the seller can confirm it's theirs. \
   RELEASE: buyer confirms in inspection -> request_release_approval. \
   If bank details are missing the seller is notified automatically; \
   say so and wait. After release, confirm payout to both parties.
 - When asked for status or "what's next", check \
-list_my_escrows first when they ask what is new or what needs them, then get_authorized_escrow_status for the one they pick — never answer from memory.
+list_my_escrows first when they ask what is new or what needs them, then get_authorized_escrow_status for the one they pick, never answer from memory.
 - When the draft is complete, FIRST call request_escrow_creation right \
-away — the backend holds it and tells you to present the exact terms. \
+away, the backend holds it and tells you to present the exact terms. \
 THEN show the terms briefly and ask for confirmation. Never show terms \
-and ask for confirmation WITHOUT calling the tool in the same turn — \
+and ask for confirmation WITHOUT calling the tool in the same turn, \
 otherwise the user is asked to confirm twice.
 - After the user confirms, call the SAME tool again with IDENTICAL \
 arguments (copy them exactly, e.g. draft_id stays a number). Do not \
-re-check, re-read, or re-validate first — just make the identical call.
+re-check, re-read, or re-validate first, just make the identical call.
 
 Rules you must follow:
 - Explain what you are about to do BEFORE doing anything consequential, \
 and only proceed after the user explicitly confirms the exact terms.
-- To create, fund, confirm, or dispute anything, use your tools — never \
+- To create, fund, confirm, or dispute anything, use your tools, never \
 claim success from conversation alone.
 - Start helping immediately; no account or verification is needed to talk, \
 quote fees, or assemble a draft.
 - Creating an escrow needs two user steps: first they confirm the exact \
 terms, then they paste the 6-digit code sent to the creator email. That \
-code arrives as their next chat message — just continue the conversation; \
+code arrives as their next chat message, just continue the conversation; \
 the app verifies it with the backend and tells you the result through \
 your tools. Never ask the user to read a code aloud or type it anywhere \
 outside this chat; never repeat a code back.
-- If the user is not verified, get their email and call request_verification_code immediately — they paste the code here in chat and everything continues. Never send them to a form or page.
+- If the user is not verified, get their email and call request_verification_code immediately, they paste the code here in chat and everything continues. Never send them to a form or page.
 - You can only see escrows the verified user participates in.
 - Never ask for an escrow code, email verification, or any identifying \
 detail unless the user wants to join, track, or act on a specific \
@@ -131,7 +131,7 @@ def find_pending_join_code(conversation):
     return ''
 
 DEGRADED_REPLY = (
-    "The AI assistant is temporarily unavailable, but nothing is lost — "
+    "The AI assistant is temporarily unavailable, but nothing is lost, "
     "you can continue with the manual escrow forms on this site."
 )
 
@@ -198,7 +198,7 @@ def _confirmation_reminder(pending):
     """Tell the model the exact awaiting proposal so it can echo it.
 
     Tool calls are hidden from history (never replayed), so without this
-    the model cannot know which arguments it proposed — it rebuilds the
+    the model cannot know which arguments it proposed, it rebuilds the
     draft and the confirmation never matches. The reminder carries only
     backend-stored proposal data (tool + args, no OTPs); execution still
     requires the user's confirmation and full backend validation.
@@ -208,7 +208,7 @@ def _confirmation_reminder(pending):
         f"{pending.get('tool')} with arguments "
         f"{json.dumps(pending.get('arguments') or {}, sort_keys=True)} "
         "and the user was asked to confirm. If their latest message "
-        "confirms it, call that tool NOW with IDENTICAL arguments — do "
+        "confirms it, call that tool NOW with IDENTICAL arguments, do "
         "not create another draft, re-read, or re-validate first. If "
         "they changed the terms or declined, handle the change instead "
         "(a new proposal replaces this one)."
@@ -231,7 +231,7 @@ def clear_proposal(conversation):
 
 
 def restart_thread(conversation):
-    """Page load means a brand-new chat — no exceptions.
+    """Page load means a brand-new chat, no exceptions.
 
     History, pending proposals, pending verification, flow context, and
     the verified owner are all cleared, and this session's unfinished
@@ -311,7 +311,7 @@ _CHANGE_WORDS_RE = re.compile(
 def _is_affirmative(text):
     """Clear confirmation of the pending proposal, in natural phrasing.
 
-    "Yes, release them." counts; "yes but change the amount" never does —
+    "Yes, release them." counts; "yes but change the amount" never does -
     any change/negation word sends the turn back to the model instead.
     """
     text = (text or '').strip()
@@ -332,41 +332,41 @@ def _direct_reply(name, outcome):
         return (f"Your escrow {data.get('reference')} is created. "
                 "Share the code with the other party so they can join.")
     if name == 'request_counterparty_join':
-        return (f"Joined — escrow {data.get('reference')} is now "
+        return (f"Joined, escrow {data.get('reference')} is now "
                 f"{data.get('status')}. {data.get('next') or ''}").strip()
     if name == 'request_payment_link':
         return (f"Here's your secure payment link: {data.get('payment_url')} "
-                "— payment is verified by the backend once completed, "
+                "- payment is verified by the backend once completed, "
                 "and the seller will be notified to ship.")
     if name == 'request_delivery_confirmation':
         if data.get('status') == 'in_inspection':
-            note = ("Receipt confirmed — the inspection window has "
+            note = ("Receipt confirmed, the inspection window has "
                     "started. Say \"release\" when you're happy, or "
                     "\"dispute\" if something is wrong.")
             if data.get('seller_bank_saved') is False:
                 note += (" The seller has been asked for their payout "
                          "bank details, which are needed before release.")
             return note
-        return ("Marked as dispatched — the buyer has been notified. "
+        return ("Marked as dispatched, the buyer has been notified. "
                 "I'll update you when they confirm receipt.")
     if name == 'request_release_approval':
-        return (f"Funds released — the seller has been paid. "
+        return (f"Funds released, the seller has been paid. "
                 f"Escrow {data.get('reference')} is complete.")
     if name == 'request_seller_bank_details':
         if data.get('already_saved'):
             return (f"Payout account already saved: {data.get('bank_name')} "
                     f"{data.get('account_number')} ({data.get('account_name')}).")
         return (f"Verified and saved. Account name: "
-                f"{data.get('account_name')} — {data.get('bank_name')} "
+                f"{data.get('account_name')}, {data.get('bank_name')} "
                 f"{data.get('account_number')}. "
                 "The buyer can now release the funds.")
     if name == 'request_dispute_submission':
-        return ("Dispute raised — funds are frozen until it's resolved. "
+        return ("Dispute raised, funds are frozen until it's resolved. "
                 "Our team will review the escrow.")
     if name == 'request_counterparty_invitation':
         return (f"Share escrow code {data.get('code')} with the other party "
                 "so they can join and verify.")
-    return "Done — that's completed."
+    return "Done, that's completed."
 
 
 def _try_direct_confirmation(conversation, user_text, actor, base_url, session_key):
@@ -423,7 +423,7 @@ def confirmed(conversation, name, arguments):
 def _history_messages(conversation, limit=20):
     """Replayable history: plain user/assistant turns only.
 
-    Tool calls and results are internal reasoning, not conversation — they
+    Tool calls and results are internal reasoning, not conversation, they
     are re-driven by the model each turn, never replayed, so nothing can
     be re-executed from history and no call ids need persisting.
     """
@@ -453,7 +453,7 @@ def run_turn(conversation, user_text, base_url='', session_key=''):
     )
     if actor:
         model_messages.append({'role': 'system', 'content':
-            f"This chat is verified as {actor} — that is the user you are "
+            f"This chat is verified as {actor}, that is the user you are "
             f"talking to. Never ask for their email again; use it with your "
             f"tools directly."})
     pending = conversation.pending_action or {}

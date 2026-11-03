@@ -1,6 +1,6 @@
 """WhatsApp Cloud API adapter.
 
-Provider-shaped code only: signatures, payload parsing, delivery. No escrow logic here —
+Provider-shaped code only: signatures, payload parsing, delivery. No escrow logic here -
 the views hand normalised messages to ``flow.py``, which drives the shared
 agent loop and backend tools.
 """
@@ -19,11 +19,11 @@ def verify_signature(raw_body, signature_header):
 
     Returns True when valid. When no app secret is configured (local dev),
     validation is skipped with a warning so flows can be exercised without
-    Meta credentials — production must always set WHATSAPP_APP_SECRET.
+    Meta credentials, production must always set WHATSAPP_APP_SECRET.
     """
     secret = getattr(settings, 'WHATSAPP_APP_SECRET', '')
     if not secret:
-        logger.warning("WHATSAPP_APP_SECRET unset — skipping signature check")
+        logger.warning("WHATSAPP_APP_SECRET unset, skipping signature check")
         return True
     if not signature_header or not signature_header.startswith('sha256='):
         return False
@@ -91,7 +91,7 @@ def send_text_message(to_wa_id, body):
     phone_id = getattr(settings, 'WHATSAPP_PHONE_NUMBER_ID', '')
     api_version = getattr(settings, 'WHATSAPP_API_VERSION', 'v21.0')
     if not token or not phone_id:
-        logger.error("WhatsApp outbound not configured — dropping reply to %s", to_wa_id)
+        logger.error("WhatsApp outbound not configured, dropping reply to %s", to_wa_id)
         return False
     url = f"https://graph.facebook.com/{api_version}/{phone_id}/messages"
     try:
@@ -122,7 +122,7 @@ def download_media(media_id):
     """Download a voice note / audio attachment. Returns bytes or None.
 
     Capped at VOICE_MAX_BYTES so a hostile media id cannot fill memory.
-    Never raises — failures return None and the caller guides the user
+    Never raises, failures return None and the caller guides the user
     back to text or a shorter recording.
     """
     token = getattr(settings, 'WHATSAPP_ACCESS_TOKEN', '')

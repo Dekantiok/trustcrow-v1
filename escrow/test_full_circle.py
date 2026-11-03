@@ -354,7 +354,7 @@ class ResumeEitherPartyTest(TestCase):
 
     def test_bank_details_accept_numeric_json_args(self):
         # The model sometimes emits bank_code/account_number as JSON
-        # numbers — that must save, not crash with a generic failure.
+        # numbers, that must save, not crash with a generic failure.
         contract = make_contract(
             code='TRSTfc060', status='in_inspection',
             creator='buyer@x.com', creator_role='buyer',

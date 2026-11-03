@@ -258,7 +258,7 @@ class EscrowDraft(models.Model):
 
 
 class Identity(models.Model):
-    """A verified user identity. No passwords — proof comes from OTP
+    """A verified user identity. No passwords, proof comes from OTP
     challenges recorded against a VerifiedContact."""
 
     email = models.EmailField(unique=True, db_index=True)

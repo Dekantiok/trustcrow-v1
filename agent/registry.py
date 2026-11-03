@@ -1,6 +1,6 @@
 """The agent's only door into the platform: 18 approved tools.
 
-Every handler receives the verified actor from the server-side session —
+Every handler receives the verified actor from the server-side session -
 never from model arguments. Anything the model sends is treated as
 untrusted input, re-validated against the same state machine as the manual forms.
 """
@@ -68,7 +68,7 @@ def _get_participant_contract(escrow_reference, actor_email):
 def _get_owned_draft(draft_id, actor_email, session_key=''):
     """A draft belongs to the session that started it, or to the verified
     email it claims once proven. Either credential opens it; neither leaks
-    the other — a miss is just 'not authorized'."""
+    the other, a miss is just 'not authorized'."""
     try:
         draft = EscrowDraft.objects.get(id=draft_id)
     except (EscrowDraft.DoesNotExist, ValueError, TypeError):
@@ -305,7 +305,7 @@ def tool_request_escrow_creation(actor, **kwargs):
                 for field, errors in form.errors.items()
             )
         )
-    # Every creation — verified chatter or not — parks on a fresh code for
+    # Every creation, verified chatter or not, parks on a fresh code for
     # THIS escrow. The code is pasted in chat, the backend verifies it,
     # and this exact call resumes: nothing is created before proof, and
     # the resume step advances the escrow so the counterparty can join.
@@ -398,7 +398,7 @@ def tool_request_delivery_confirmation(actor, **kwargs):
         )
     fields = {'seller_confirmed': True} if stage == 'dispatch' else {'buyer_confirmed': True}
     if stage == 'receipt':
-        # Inspection starts at receipt, same as the manual form — without
+        # Inspection starts at receipt, same as the manual form, without
         # this deadline auto-release can never fire for chat deals.
         import datetime
         from django.utils import timezone as _tz
@@ -410,7 +410,7 @@ def tool_request_delivery_confirmation(actor, **kwargs):
                  contract, actor=actor)
     bank_saved = SettlementVault.objects.filter(contract=contract).exists()
     if stage == 'receipt' and not bank_saved:
-        # The seller cannot be paid without payout details — ask now,
+        # The seller cannot be paid without payout details, ask now,
         # at receipt, not later when the buyer tries to release.
         notify_event('bank_details_needed', contract, actor=actor)
     return {'ok': True, 'data': {
@@ -433,7 +433,7 @@ def tool_request_release_approval(actor, **kwargs):
         audit('release.blocked_no_vault', actor=actor, escrow=contract)
         raise ToolError(
             "The seller has not added payout bank details yet. I've "
-            "notified them to add them here in chat — release again once "
+            "notified them to add them here in chat, release again once "
             "they confirm the account is saved."
         )
     result = release_escrow_funds(contract)
@@ -464,7 +464,7 @@ def tool_request_verification_code(actor, **kwargs):
             and conversation.owner_email == email):
         return {'ok': True, 'data': {
             'already_verified': True, 'email': email,
-            'next': 'This chat is already verified for that email — carry on.',
+            'next': 'This chat is already verified for that email, carry on.',
         }}
     if conversation is not None and escrow_reference:
         # Remember what the code is *for*: when it comes back verified,
@@ -519,7 +519,7 @@ def tool_request_counterparty_join(actor, **kwargs):
         'next': (
             'Joined. The creator has been notified and the buyer can now '
             'fund this escrow.' if actor != contract.buyer_email else
-            'Joined. You are the buyer — say "fund" and I will get your '
+            'Joined. You are the buyer, say "fund" and I will get your '
             'payment link after you confirm.'),
     }}
 
@@ -563,7 +563,7 @@ def tool_request_seller_bank_details(actor, **kwargs):
         )
     if not account_number.isdigit() or len(account_number) != 10:
         raise ToolError("The account number must be exactly 10 digits.")
-    # Backend verification is authoritative — never save what was typed
+    # Backend verification is authoritative, never save what was typed
     # until Paystack resolves the account name.
     verification = verify_bank_account(account_number, bank_code)
     if not verification.get('status'):
@@ -678,7 +678,7 @@ TOOLS = [
             {'escrow_reference': _str('The escrow code.')},
             ['escrow_reference']),
     _schema('create_escrow_draft',
-            'Save proposed terms as a draft — partial is fine, save early '
+            'Save proposed terms as a draft, partial is fine, save early '
             'and top up as details arrive. Nothing is created yet. Only '
             'title, amount, creator_email and counterparty_email truly need '
             'the user; assume fee_payer buyer, inspection_days 3, and reuse '
@@ -748,7 +748,7 @@ TOOLS = [
     _schema('request_verification_code',
             'Send the email verification code so the user can join, track, '
             'or act on an escrow. Call as soon as they share their email. '
-            'The user pastes the code here in chat — never send them '
+            'The user pastes the code here in chat, never send them '
             'anywhere else; tell them to reply with it.',
             {'email': _str('The user’s own email address to verify.'),
              'escrow_reference': _str(
@@ -769,7 +769,7 @@ TOOLS = [
             'Verify (via the backend resolver) and save the seller’s '
             'payout bank account for an escrow. Only the verified '
             'seller, only after explicit confirmation. Never invent a '
-            'bank code — match the name via get_bank_list first.',
+            'bank code, match the name via get_bank_list first.',
             {'escrow_reference': _str('The escrow code.'),
              'bank_code': _str('Bank code from get_bank_list.'),
              'account_number': _str('Exactly 10 digits.')},
@@ -786,7 +786,7 @@ TOOLS = [
 def execute(name, arguments, actor_email=None, base_url='', session_key='',
             conversation=None):
     """Run one approved tool. Unknown tools and auth failures are errors,
-    never exceptions — the loop relays them to the model."""
+    never exceptions, the loop relays them to the model."""
     handler = HANDLERS.get(name)
     if handler is None:
         return {'ok': False, 'error': f"Unknown tool '{name}'."}

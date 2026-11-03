@@ -87,7 +87,7 @@ class PaystackGateway(PaymentGatewayBase):
         """Create (or fetch existing) Paystack recipient; returns recipient_code or None.
 
         Paystack dedupes on account number, so calling this on every payout
-        is idempotent — a retry returns the existing recipient record.
+        is idempotent, a retry returns the existing recipient record.
         """
         payload = {
             "type": "nuban",

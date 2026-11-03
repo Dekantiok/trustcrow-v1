@@ -1,7 +1,7 @@
 """Agent misuse resistance (spec sections 6.6, 15.3).
 
 The model is untrusted input: rogue tools, argument spoofing, prompt
-injection, and failures must all degrade to safe errors — never to
+injection, and failures must all degrade to safe errors, never to
 unauthorized state changes or fabricated success.
 """
 import json

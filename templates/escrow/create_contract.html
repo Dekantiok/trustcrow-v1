@@ -1,5 +1,5 @@
 {% extends 'base.html' %}
-{% block title %}Create Escrow — Trustcrow{% endblock %}
+{% block title %}Create Escrow | Trustcrow{% endblock %}
 {% block content %}
 <div class="row justify-content-center">
     <div class="col-12 col-md-10 col-lg-7">
@@ -74,12 +74,12 @@
                             </div>
                             <div class="col-6">
                                 <span class="text-muted-custom">Buyer Pays:</span>
-                                <div class="mono-text fw-semibold text-accent" id="est-buyer-total">—</div>
+                                <div class="mono-text fw-semibold text-accent" id="est-buyer-total">-</div>
                             </div>
                             <div class="col-12 border-top pt-2 mt-2" style="border-color:var(--color-border) !important;">
                                 <div class="d-flex justify-content-between">
                                     <span class="text-muted-custom">Seller Receives:</span>
-                                    <span class="mono-text fw-semibold text-navy" id="est-seller-net">—</span>
+                                    <span class="mono-text fw-semibold text-navy" id="est-seller-net">-</span>
                                 </div>
                             </div>
                         </div>
@@ -153,8 +153,8 @@
             var val = parseFloat(amountInput ? amountInput.value : 0);
             if (isNaN(val) || val < 100) {
                 if (feeEl) feeEl.textContent = '₦1,500.00';
-                if (buyerEl) buyerEl.textContent = '—';
-                if (sellerEl) sellerEl.textContent = '—';
+                if (buyerEl) buyerEl.textContent = '-';
+                if (sellerEl) sellerEl.textContent = '-';
                 return;
             }
             var fee = calculateFee(val);

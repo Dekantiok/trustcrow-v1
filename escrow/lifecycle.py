@@ -26,7 +26,7 @@ def _copy(event, contract):
     code = contract.code
     if event == 'counterparty_joined':
         return (f"Update on escrow {code}: the counterparty has joined "
-                "and verified. It is now awaiting funding — the buyer "
+                "and verified. It is now awaiting funding, the buyer "
                 "can pay next.")
     if event == 'bank_details_needed':
         return (f"Action needed on escrow {code}: the buyer is ready to "
@@ -43,13 +43,13 @@ def _copy(event, contract):
     if event == 'receipt_confirmed':
         ends = (contract.inspection_ends.strftime('%d %b, %H:%M')
                 if contract.inspection_ends else 'the deadline')
-        return (f"Receipt confirmed for {code} — inspection ends {ends}. "
+        return (f"Receipt confirmed for {code}, inspection ends {ends}. "
                 "Say 'release' to pay the seller or 'dispute' if "
                 "something is wrong.")
     if event == 'payout_completed':
-        return f"Escrow {code} is complete — the seller has been paid."
+        return f"Escrow {code} is complete, the seller has been paid."
     if event == 'disputed':
-        return (f"A dispute was raised on escrow {code} — funds are "
+        return (f"A dispute was raised on escrow {code}, funds are "
                 "frozen until it is resolved.")
     return ''
 
@@ -69,7 +69,7 @@ def _append_web_message(email, text):
 
     Open chat pages poll and swap it in live; it also greets them if
     they return before any refresh. The actor's own chat is skipped by
-    the caller — they already saw the result of their action.
+    the caller, they already saw the result of their action.
     """
     from agent.models import AIConversation
     conversation = (AIConversation.objects

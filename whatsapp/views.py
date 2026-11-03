@@ -1,9 +1,9 @@
 """WhatsApp Cloud API webhook.
 
-GET  — Meta verification challenge (hub.mode / hub.verify_token).
-POST — inbound messages + delivery statuses. Always ack 200 after
+GET , Meta verification challenge (hub.mode / hub.verify_token).
+POST, inbound messages + delivery statuses. Always ack 200 after
        persisting, so Meta stops retrying; duplicates are ignored via the
-       shared WebhookEvent unique constraint. No escrow logic here — text
+       shared WebhookEvent unique constraint. No escrow logic here, text
        messages are handed to ``flow.handle_text_message``.
 """
 import json
@@ -135,7 +135,7 @@ def webhook(request):
             logger.exception("WhatsApp message processing failed for %s", wamid)
             audit('whatsapp.processing_failed', metadata={'wamid': wamid})
             # Fall through to mark_processed: the event was received and the
-            # failure is logged — retrying the same payload won't help.
+            # failure is logged, retrying the same payload won't help.
         mark_processed()
 
     return HttpResponse('Received', status=200)

@@ -436,7 +436,7 @@ def escrow_next_step(contract, actor_email):
     has_vault = SettlementVault.objects.filter(contract=contract).exists()
     status = contract.status
     if status == 'awaiting_counterparty':
-        return ("Waiting for the counterparty to join — share the code "
+        return ("Waiting for the counterparty to join, share the code "
                 "with them." if actor == contract.creator_email else
                 "Say \"join\" to accept and continue.")
     if status == 'awaiting_funding':
@@ -462,7 +462,7 @@ def escrow_next_step(contract, actor_email):
     if status == 'pending_payout':
         return "Payout is being processed."
     if status == 'completed':
-        return "This escrow is complete — the seller has been paid."
+        return "This escrow is complete, the seller has been paid."
     if status == 'disputed':
         return "This escrow is disputed; funds are frozen pending review."
     if status == 'cancelled':

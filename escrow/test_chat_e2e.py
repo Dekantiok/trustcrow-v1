@@ -135,7 +135,7 @@ class ChatE2ETest(TestCase):
         self.send(counterparty, f'my email is {counterparty_email}', [
             tool_call('request_verification_code', {
                 'email': counterparty_email, 'escrow_reference': contract.code,
-            }, 'v1'), text_reply('Code sent — paste it here.')])
+            }, 'v1'), text_reply('Code sent, paste it here.')])
         response = self.send(counterparty, self.last_otp())
         self.assertContains(response, 'joined')
         contract.refresh_from_db()

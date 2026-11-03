@@ -244,7 +244,7 @@ class LoopTest(TestCase):
 
         convo.refresh_from_db()
         with self.script([{'text': '', 'tool_calls': [call], 'usage': {}}]):
-            run_turn(convo, 'Yes, I confirm — raise it.')
+            run_turn(convo, 'Yes, I confirm, raise it.')
         self.assertEqual(
             EscrowContract.objects.get(code='AGENT002').status, 'disputed')
         convo.refresh_from_db()
@@ -255,7 +255,7 @@ class LoopTest(TestCase):
         convo = self.make_conversation(owner='buyer@example.com')
         propose_action(convo, 'request_escrow_creation', {'draft_id': 7})
         convo.refresh_from_db()
-        # The model sometimes re-emits the id as a string on its retry —
+        # The model sometimes re-emits the id as a string on its retry -
         # that must still count as the same confirmed proposal.
         self.assertTrue(confirmed(
             convo, 'request_escrow_creation', {'draft_id': '7'}))
@@ -518,7 +518,7 @@ class ChatViewTest(TestCase):
             fee_payer='buyer', creator_role='buyer',
             counterparty_email='seller@example.com', inspection_days=3)
         with patch('agent.loop.chat', return_value={
-                'text': 'Here are the terms — confirm?', 'tool_calls': [],
+                'text': 'Here are the terms, confirm?', 'tool_calls': [],
                 'usage': {}}):
             run_turn(convo, 'looks good', session_key='sess-auto')
         convo.refresh_from_db()

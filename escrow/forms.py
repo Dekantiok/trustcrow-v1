@@ -52,7 +52,7 @@ class ContractCreationForm(forms.ModelForm):
                 self.fields[name].widget.attrs.setdefault('placeholder', ph)
         # Voice dictation shines on free-text fields: the shared voice.js
         # attaches a mic button to anything carrying data-voice. Amounts and
-        # emails stay typed — STT mangles numbers and spelled-out addresses.
+        # emails stay typed, STT mangles numbers and spelled-out addresses.
         for name in ('title', 'description'):
             self.fields[name].widget.attrs.setdefault('data-voice', '1')
 

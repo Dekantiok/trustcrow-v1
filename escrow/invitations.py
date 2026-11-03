@@ -33,13 +33,13 @@ def send_counterparty_invitation(contract, base_url=''):
     body = (
         f"Hello,\n\n"
         f"{contract.creator_email} started a Trustcrow escrow with you:\n\n"
-        f"  {contract.title} — {contract.amount} {contract.currency}\n"
+        f"  {contract.title}, {contract.amount} {contract.currency}\n"
         f"  Escrow code: {contract.code}\n\n"
         f"Review the terms and accept or reject them here:\n"
         f"  {join_link}\n\n"
         f"You will verify this email address with a one-time code before "
         f"anything is shown. The code alone does not grant access.\n\n"
-        f"— Trustcrow"
+        f"- Trustcrow"
     )
     try:
         send_mail(subject, body, None, [contract.counterparty_email],

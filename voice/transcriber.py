@@ -1,7 +1,7 @@
 """Muse Voice Transcribe client over the Meta Model API.
 
 Pipeline: arbitrary audio (webm/opus, ogg/opus) is converted to mono 16-bit PCM WAV at 24 kHz with the pip-bundled ffmpeg
-binary (imageio-ffmpeg — no apt needed), then sent to
+binary (imageio-ffmpeg, no apt needed), then sent to
 ``POST {ASR_BASE_URL}/v1/asr/transcribe`` in PUSH_TO_TALK mode.
 
 Billing: ~$0.18/hr of audio processed. Input is capped (VOICE_MAX_BYTES)
@@ -22,7 +22,7 @@ TARGET_RATE = 24000
 
 
 class VoiceConfigError(Exception):
-    """MODEL_API_KEY (or model config) missing — voice unavailable."""
+    """MODEL_API_KEY (or model config) missing, voice unavailable."""
 
 
 class VoiceTranscriptionError(Exception):

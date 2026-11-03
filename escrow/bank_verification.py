@@ -54,7 +54,7 @@ def verify_bank_account(account_number, bank_code):
 
     if _secret() in ('', 'sk_test_dummy'):
         # No real gateway key configured: canned answer so local flows
-        # can be exercised offline. Never used when a key exists — the
+        # can be exercised offline. Never used when a key exists, the
         # resolver returns the actual account name even on test keys.
         return {
             'status': True,

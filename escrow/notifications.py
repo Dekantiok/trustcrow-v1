@@ -11,7 +11,7 @@ DEFAULT_TIMEOUT = 15
 def send_otp_via_termii(email, otp_code):
     if settings.DEBUG and not getattr(settings, 'TERMII_SEND_IN_DEBUG', False):
         # Local mock: pretend delivery succeeded so flows can be exercised
-        # without spending Termii credit. Nothing is emailed here — set
+        # without spending Termii credit. Nothing is emailed here, set
         # TERMII_SEND_IN_DEBUG=True (with LOG_OTP_TO_CONSOLE as needed) for
         # live local testing.
         if getattr(settings, 'LOG_OTP_TO_CONSOLE', False):
@@ -23,7 +23,7 @@ def send_otp_via_termii(email, otp_code):
 
     url = "https://api.ng.termii.com/api/email/otp/send"
 
-    # Email Token API: `code` is REQUIRED — it is the exact OTP the user
+    # Email Token API: `code` is REQUIRED, it is the exact OTP the user
     # receives. The pin_* / message_text fields belong to the SMS Token API
     # and are ignored here; omitting `code` was why production emails never
     # matched the code stored in AuthOTP.

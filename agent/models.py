@@ -18,7 +18,7 @@ class AIConversation(models.Model):
     channel_identity = models.CharField(max_length=255, db_index=True)
     owner_email = models.EmailField(null=True, blank=True, db_index=True)
     # Email awaiting OTP proof for in-chat verification (website assistant).
-    # A bare 6-digit reply while this is set is consumed as the code —
+    # A bare 6-digit reply while this is set is consumed as the code -
     # never forwarded to the model.
     pending_email = models.EmailField(null=True, blank=True)
     # Flow context that must survive an OTP round-trip, e.g.
@@ -27,7 +27,7 @@ class AIConversation(models.Model):
     # Awaiting user confirmation for one consequential tool call:
     # {'tool': name, 'arguments': {...}, 'proposed_at': iso-timestamp}.
     # Set when the agent presents a proposal, cleared on execution or
-    # expiry. Never set from model input — only by the loop itself.
+    # expiry. Never set from model input, only by the loop itself.
     pending_action = models.JSONField(default=dict, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)

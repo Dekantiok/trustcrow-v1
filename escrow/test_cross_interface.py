@@ -2,7 +2,7 @@
 
 The web form, website AI assistant, and WhatsApp AI assistant must produce
 consistent records through the same validation, authorization, and
-financial rules — never separate versions of the business logic.
+financial rules, never separate versions of the business logic.
 """
 import inspect
 from decimal import Decimal
