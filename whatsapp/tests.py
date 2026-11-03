@@ -247,3 +247,66 @@ class CreationResumeTest(TestCase):
             creator_email='buyer@example.com').exists())
         link.refresh_from_db()
         self.assertEqual(link.verified_email, 'buyer@example.com')
+
+    def test_escrow_code_triggers_join_request_for_stranger(self):
+        from whatsapp.flow import handle_text_message
+        with patch('whatsapp.flow.run_turn') as mock_turn:
+            reply = handle_text_message('2348000000999', 'I want to join TRSTx1y2z')
+        mock_turn.assert_not_called()
+        self.assertIn('TRSTx1y2z', reply)
+        self.assertIn('email', reply.lower())
+        from agent.models import AIConversation
+        convo = AIConversation.objects.get(
+            channel='whatsapp', channel_identity='2348000000999')
+        self.assertEqual(
+            convo.pending_context.get('join_escrow_reference'), 'TRSTx1y2z')
+
+    def test_escrow_code_resumes_for_verified_participant(self):
+        from decimal import Decimal
+        from escrow.models import EscrowContract
+        EscrowContract.objects.create(
+            code='TRSTV9R4T', title='T', description='D',
+            amount=Decimal('50000'), service_fee=Decimal('1500'),
+            fee_payer='buyer', creator_email='seller@x.com',
+            creator_role='seller', counterparty_email='buyer@x.com',
+            status='awaiting_counterparty', gateway_reference='REF_V9')
+        from whatsapp.flow import handle_text_message
+        from whatsapp.models import WhatsAppLink
+        WhatsAppLink.objects.create(
+            wa_id='2348000000998', verified_email='buyer@x.com')
+        reply = handle_text_message('2348000000998', 'join TRSTV9R4T')
+        self.assertIn('awaiting_funding', reply)
+        self.assertEqual(
+            EscrowContract.objects.get(code='TRSTV9R4T').status,
+            'awaiting_funding')
+
+    def test_media_download_rejects_offhost_url(self):
+        from unittest.mock import MagicMock
+        from whatsapp import adapter
+        meta = MagicMock(status_code=200)
+        meta.json.return_value = {'url': 'https://evil.example/x.ogg'}
+        with patch.object(adapter.requests, 'get', return_value=meta) as mock_get:
+            self.assertIsNone(adapter.download_media('m1'))
+        mock_get.assert_called_once()
+
+    def test_media_download_streams_under_cap(self):
+        from unittest.mock import MagicMock
+        from whatsapp import adapter
+        meta = MagicMock(status_code=200)
+        meta.json.return_value = {'url': 'https://graph.facebook.com/x'}
+        blob = MagicMock(status_code=200)
+        blob.iter_content.return_value = [b'a' * 100, b'b' * 100]
+        with patch.object(adapter.requests, 'get', side_effect=[meta, blob]):
+            with override_settings(WHATSAPP_MEDIA_MAX_BYTES=1000):
+                self.assertEqual(adapter.download_media('m2'), b'a' * 100 + b'b' * 100)
+
+    def test_media_download_stops_over_cap(self):
+        from unittest.mock import MagicMock
+        from whatsapp import adapter
+        meta = MagicMock(status_code=200)
+        meta.json.return_value = {'url': 'https://x.fbcdn.net/v/t/x.ogg'}
+        blob = MagicMock(status_code=200)
+        blob.iter_content.return_value = [b'a' * 600, b'b' * 600]
+        with patch.object(adapter.requests, 'get', side_effect=[meta, blob]):
+            with override_settings(WHATSAPP_MEDIA_MAX_BYTES=1000):
+                self.assertIsNone(adapter.download_media('m3'))

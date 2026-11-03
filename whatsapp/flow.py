@@ -8,6 +8,7 @@ Plaintext codes are never stored or sent to the model.
 import logging
 
 from agent.loop import (
+    ESCROW_CODE_RE,
     OTP_MESSAGE_RE,
     find_pending_join_code,
     get_or_create_conversation,
@@ -227,7 +228,47 @@ def handle_text_message(wa_id, text, base_url=''):
         adapter.send_text_message(wa_id, NO_CODE_PENDING)
         return NO_CODE_PENDING
 
-    # 2. Email address: issue a verification code.
+    # 2. Escrow code shared mid-chat: treat it as "join this specific
+    # escrow" without waiting for the agent. Verified participants jump
+    # straight to status; everyone else is asked for their email, and the
+    # code is remembered so the join completes on verification.
+    match = ESCROW_CODE_RE.search(text)
+    if match and not _looks_like_email(text):
+        code = match.group(0)
+        if conversation.pending_context.get('join_escrow_reference') != code:
+            conversation.pending_context = {
+                **(conversation.pending_context or {}),
+                'join_escrow_reference': code,
+            }
+            conversation.save(update_fields=['pending_context'])
+        owner = (conversation.owner_email or '').strip()
+        if owner:
+            from escrow.services import resume_escrow_after_verification
+            conversation.messages.create(role='user', content=text)
+            contract, kind, error = resume_escrow_after_verification(code, owner)
+            if contract is None:
+                reply = f"I couldn't continue that escrow: {error}"
+            else:
+                audit(f'counterparty.{kind}_via_whatsapp', actor=owner,
+                      escrow=contract)
+                noun = 'joined' if kind == 'joined' else 'resumed'
+                reply = (f"{contract.code}: {noun} — {contract.status}. "
+                         + escrow_next_step(contract, owner))
+            conversation.messages.create(role='assistant', content=reply)
+            adapter.send_text_message(wa_id, reply)
+            return reply
+        link_pending = normalize_email(link.pending_email or '')
+        reply = (f"Got it — {code}. What's your email address so I can "
+                 "verify you and pull it up?")
+        conversation.messages.create(role='user', content=text)
+        conversation.messages.create(role='assistant', content=reply)
+        adapter.send_text_message(wa_id, reply)
+        if link_pending:
+            adapter.send_text_message(
+                wa_id, CODE_SENT_TEMPLATE.format(email=link_pending))
+        return reply
+
+    # 3. Email address: issue a verification code.
     if _looks_like_email(text):
         email = normalize_email(text)
         if link.verified_email == email:

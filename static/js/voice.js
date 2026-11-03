@@ -15,6 +15,9 @@
               navigator.mediaDevices.getUserMedia);
   }
 
+  // stop(send=true) finishes and uploads the take; stop(false) discards
+  // it. A cancelled take must never reach transcription: cancelling means
+  // "do not send this audio anywhere", so onstop drops the chunks.
   function recordOnce(onDone, onError) {
     if (!supported()) {
       onError(new Error('Voice recording is not supported in this browser.'));
@@ -23,6 +26,7 @@
     var recorder = null;
     var chunks = [];
     var stopped = false;
+    var deliver = true;
     navigator.mediaDevices.getUserMedia({ audio: true }).then(function (stream) {
       if (stopped) {
         stream.getTracks().forEach(function (t) { t.stop(); });
@@ -43,21 +47,29 @@
         return;
       }
       recorder.ondataavailable = function (ev) {
-        if (ev.data && ev.data.size) chunks.push(ev.data);
+        if (deliver && ev.data && ev.data.size) chunks.push(ev.data);
       };
       recorder.onstop = function () {
         stream.getTracks().forEach(function (t) { t.stop(); });
+        if (!deliver) return;
         onDone(new Blob(chunks, { type: recorder.mimeType || 'audio/webm' }));
       };
       recorder.start();
       recordOnce.active = recorder;
     }).catch(onError);
-    return function stop() {
-      stopped = true;
-      var r = recordOnce.active;
-      if (r && r.state !== 'inactive') r.stop();
-      recordOnce.active = null;
+    var handle = {
+      stop: function (send) {
+        deliver = send !== false;
+        stopped = true;
+        var r = recordOnce.active;
+        if (r && r.state !== 'inactive') r.stop();
+        recordOnce.active = null;
+      },
     };
+    // Backwards-compatible callable: stop() sends, stop.cancel() discards.
+    var fn = function () { handle.stop(true); };
+    fn.cancel = function () { handle.stop(false); };
+    return fn;
   }
   recordOnce.active = null;
   recordOnce.supported = supported;
@@ -205,7 +217,7 @@
       if (Date.now() - startedAt < 400) {
         var s = stop; stop = null;
         if (btn._stopRecUI) btn._stopRecUI();
-        s();
+        s.cancel();
         btn.innerHTML = '<i class="bi bi-mic"></i>';
         hint.textContent = 'Hold the mic button while you speak.';
         return;
@@ -221,8 +233,9 @@
       if (!stop) return;
       var s = stop; stop = null;
       if (btn._stopRecUI) btn._stopRecUI();
+      s.cancel();
       btn.innerHTML = '<i class="bi bi-mic"></i>';
-      hint.textContent = '';
+      hint.textContent = 'Recording discarded — nothing was sent.';
     }
     btn.addEventListener('pointerup', releaseToSend);
     btn.addEventListener('pointerleave', releaseToSend);
@@ -310,7 +323,7 @@
       if (Date.now() - startedAt < 400) {
         var s = stop; stop = null;
         stopRecUI();
-        s();
+        s.cancel();
         mic.innerHTML = '<i class="bi bi-mic"></i>';
         if (hint) hint.textContent = 'Hold the mic button while you speak.';
         return;
@@ -327,7 +340,9 @@
       if (!stop) return;
       var s = stop; stop = null;
       stopRecUI();
+      s.cancel();
       mic.innerHTML = '<i class="bi bi-mic"></i>';
+      if (hint) hint.textContent = 'Recording discarded — nothing was sent.';
     }
     mic.addEventListener('pointerup', releaseToSend);
     mic.addEventListener('pointerleave', releaseToSend);

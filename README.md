@@ -40,13 +40,14 @@ The AI handles the whole arc conversationally: draft → confirm → code → jo
 - Python 3.14, Django (templates + HTMX, no separate frontend)
 - Gunicorn + WhiteNoise, `dj-database-url`
 - Paystack (payments + transfers), Termii (email OTP), SMTP/email (counterparty invites)
+- Hold-to-speak voice notes on web and WhatsApp; cancelled or sub-second taps are discarded, never transcribed
 - Baseten-hosted chat model (OpenAI-compatible), Meta Muse Voice Transcribe (STT)
 - SQLite locally, Postgres (e.g. Neon) when `DJANGO_DEBUG=False`
 - Timezone: `Africa/Lagos`
 
 ## Quickstart
 
-You need Python 3.12 or newer (the project runtime is Python 3.14), Git, and a Baseten API key if you want to test the AI assistant. For the quickest evaluation, use Demo mode below. It needs no Termii or Paystack keys.
+You need Python 3.13 or newer (the project runtime is Python 3.14), Git, and a Baseten API key if you want to test the AI assistant. For the quickest evaluation, use Demo mode below. It needs no Termii or Paystack keys.
 
 ```bash
 # 1. Clone + venv
@@ -249,8 +250,10 @@ Copy `.env.example` → `.env`. Never commit `.env`.
 | `/assistant/send/` | `agent:chat_send` | Chat turn |
 | `/assistant/voice/` | `agent:chat_voice` | Voice note → transcript → turn |
 | `/assistant/transcribe/` | `agent:transcribe_field` | Field-level transcription (JSON) |
-| `/assistant/new/` | `agent:chat_new` | Fresh thread |
-| `/assistant/poll/` | `agent:chat_poll` | Live chat updates for open pages (`204` when nothing new) |
+| `/assistant/new/` | `agent:chat_new` | Fresh thread (full page loads always restart) |
+| `/assistant/verify/` | `agent:chat_verify` | Email-code verification form |
+| `/assistant/dismiss/` | `agent:chat_dismiss` | Discard a pending proposal |
+| `/assistant/poll/` | `agent:chat_poll` | Live chat updates for open pages (`204` when nothing new). Polls every ~10s while the tab is visible; safe during recording, typing, or an open proposal — it only returns rendered thread state |
 | `/demo/pay/<code>/` | `demo_pay` | Simulated checkout, Demo mode only (`404` when off) |
 | `/escrow/<code>/dispatch/` `/receipt/` `/release/` `/dispute/` `/seller-dispute/` `/cancel/` `/vault/` |, | Lifecycle actions |
 | `/my-escrow/` `/my-escrow/verify/` `/my-escrow/list/` | `my_escrow*` | Email+OTP deal lookup |
@@ -274,7 +277,7 @@ Procfile           # web: gunicorn / worker: auto_release_escrow
 runtime.txt
 ```
 
-Design tokens, components, and responsive rules live in `templates/base.html`; `design.md` is the local UI source of truth (gitignored) and `escrow/tests.py::SmokeTest` enforces its guardrails, run `python manage.py test` before pushing UI changes.
+Design tokens, components, and responsive rules live in `templates/base.html`, and `escrow/tests.py::SmokeTest` renders every page plus checks URL reversal, run `python manage.py test` before pushing UI changes.
 
 ## The AI agent
 

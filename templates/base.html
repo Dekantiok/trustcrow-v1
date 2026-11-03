@@ -247,7 +247,7 @@
         <div class="container d-flex flex-wrap align-items-center gap-2">
             <a class="navbar-brand fw-bold fs-4 me-auto" href="{% url 'home' %}">Trustcrow</a>
             <div class="d-none d-md-flex align-items-center gap-1">
-                <a href="{% url 'home' %}" class="nav-link-custom">How it works</a>
+                <a href="{% url 'home' %}#how-it-works" class="nav-link-custom">How it works</a>
                 <a href="{% url 'create_contract' %}" class="nav-link-custom">Create Escrow</a>
                 <a href="{% url 'agent:chat' %}" class="nav-link-custom">Assistant</a>
             </div>
@@ -292,7 +292,7 @@
                 </div>
                 <div class="col-6 col-md-3">
                     <p class="small fw-bold text-uppercase mb-2" style="color: #fff; letter-spacing: 0.08em;">Product</p>
-                    <a href="{% url 'home' %}" class="d-block small py-1 text-decoration-none" style="color: #B9B5AD;">How it works</a>
+                    <a href="{% url 'home' %}#how-it-works" class="d-block small py-1 text-decoration-none" style="color: #B9B5AD;">How it works</a>
                     <a href="{% url 'create_contract' %}" class="d-block small py-1 text-decoration-none" style="color: #B9B5AD;">Create Escrow</a>
                     <a href="{% url 'my_escrow' %}" class="d-block small py-1 text-decoration-none" style="color: #B9B5AD;">My Escrows</a>
                     <a href="{% url 'agent:chat' %}" class="d-block small py-1 text-decoration-none" style="color: #B9B5AD;">AI Assistant</a>

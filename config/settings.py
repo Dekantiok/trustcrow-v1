@@ -279,6 +279,11 @@ AGENT_REQUEST_TIMEOUT = int(os.environ.get('AGENT_REQUEST_TIMEOUT', '60'))
 # the payout path.
 GATEWAY_HTTP_TIMEOUT = int(os.environ.get('GATEWAY_HTTP_TIMEOUT', '15'))
 
+# Cap on outbound WhatsApp media downloads (voice notes). Notes above the
+# cap are rejected before download state accumulates; the transcriber also
+# caps the converted WAV independently.
+WHATSAPP_MEDIA_MAX_BYTES = int(os.environ.get('WHATSAPP_MEDIA_MAX_BYTES', str(8 * 1024 * 1024)))
+
 # Minimum gap between one-time codes sent to the same address for the same
 # purpose, which bounds inbox spam driven from a known escrow code.
 OTP_ISSUE_COOLDOWN_SECONDS = int(os.environ.get('OTP_ISSUE_COOLDOWN_SECONDS', '60'))

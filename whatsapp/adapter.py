@@ -121,18 +121,26 @@ def send_text_message(to_wa_id, body):
     return True
 
 
+def _media_host_ok(url):
+    """Only fetch media from Meta's graph/CDN hosts."""
+    from urllib.parse import urlparse
+    host = (urlparse(url or '').hostname or '').lower()
+    return host == 'graph.facebook.com' or host.endswith('.fbcdn.net')
+
+
 def download_media(media_id):
     """Download a voice note / audio attachment. Returns bytes or None.
 
-    Capped at VOICE_MAX_BYTES so a hostile media id cannot fill memory.
-    Never raises, failures return None and the caller guides the user
-    back to text or a shorter recording.
+    Streams with a byte cap so a hostile media id cannot fill memory, and
+    only fetches from Meta hosts. Never raises: failures return None and
+    the caller guides the user back to text or a shorter recording.
     """
     token = getattr(settings, 'WHATSAPP_ACCESS_TOKEN', '')
     api_version = getattr(settings, 'WHATSAPP_API_VERSION', 'v21.0')
     if not token or not media_id:
         return None
     timeout = getattr(settings, 'GATEWAY_HTTP_TIMEOUT', 15)
+    max_bytes = getattr(settings, 'WHATSAPP_MEDIA_MAX_BYTES', 8 * 1024 * 1024)
     try:
         meta = requests.get(
             f"https://graph.facebook.com/{api_version}/{media_id}",
@@ -143,20 +151,31 @@ def download_media(media_id):
             logger.warning("WhatsApp media lookup failed: %s", meta.status_code)
             return None
         url = (meta.json() or {}).get('url') or ''
-        if not url:
+        if not url or not _media_host_ok(url):
+            logger.warning("WhatsApp media URL rejected for %s", media_id)
             return None
         blob = requests.get(
             url, headers={'Authorization': f'Bearer {token}'},
-            timeout=timeout + 15,
+            timeout=timeout + 15, stream=True,
         )
-        if blob.status_code != 200 or not blob.content:
+        if blob.status_code != 200:
             logger.warning("WhatsApp media download failed: %s", blob.status_code)
+            return None
+        chunks = []
+        total = 0
+        for piece in blob.iter_content(chunk_size=64 * 1024):
+            if not piece:
+                continue
+            total += len(piece)
+            if total > max_bytes:
+                logger.warning("WhatsApp media over cap (%s)", media_id)
+                return None
+            chunks.append(piece)
+        content = b''.join(chunks)
+        if not content:
+            logger.warning("WhatsApp media download empty for %s", media_id)
             return None
     except Exception:
         logger.exception("WhatsApp media download raised for %s", media_id)
         return None
-    max_bytes = getattr(settings, 'VOICE_MAX_BYTES', 8 * 1024 * 1024)
-    if len(blob.content) > max_bytes:
-        logger.warning("WhatsApp media too large (%d bytes)", len(blob.content))
-        return None
-    return blob.content
+    return content
