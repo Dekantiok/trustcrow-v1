@@ -350,3 +350,25 @@ class ResumeEitherPartyTest(TestCase):
         contract = make_contract(code='TRSTfc057', status='in_inspection')
         step = escrow_next_step(contract, 'seller@x.com')
         self.assertIn('bank', step.lower())
+
+    def test_bank_details_accept_numeric_json_args(self):
+        # The model sometimes emits bank_code/account_number as JSON
+        # numbers — that must save, not crash with a generic failure.
+        contract = make_contract(
+            code='TRSTfc060', status='in_inspection',
+            creator='buyer@x.com', creator_role='buyer',
+            counterparty='seller@x.com')
+        with patch('agent.registry.verify_bank_account',
+                   return_value={'status': True, 'account_name': 'FELIX K'}), \
+             patch('agent.registry.list_banks',
+                   return_value={'999992': 'OPay Digital Services'}):
+            result = execute(
+                'request_seller_bank_details',
+                {'escrow_reference': contract.code, 'bank_code': 999992,
+                 'account_number': 8105885425},
+                actor_email='seller@x.com')
+        self.assertTrue(result['ok'], result)
+        vault = SettlementVault.objects.get(contract=contract)
+        self.assertEqual(vault.account_number, '8105885425')
+        self.assertTrue(vault.bank_name.startswith('OPay'))
+        self.assertEqual(vault.account_name, 'FELIX K')

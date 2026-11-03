@@ -217,7 +217,7 @@ def tool_create_escrow_draft(actor, **kwargs):
     session_key = kwargs.get('_session_key', '')
     _require_draft_identity(actor, session_key)
     fields = {k: kwargs.get(k) for k in DRAFT_FIELDS if kwargs.get(k) not in (None, '')}
-    claimed = (kwargs.get('creator_email') or '').strip()
+    claimed = str(kwargs.get('creator_email') or '').strip()
     if claimed and actor and claimed != actor:
         raise ToolError(
             "That email does not match this verified chat. "
@@ -248,7 +248,7 @@ def tool_update_escrow_draft(actor, **kwargs):
     for key in DRAFT_FIELDS:
         if kwargs.get(key) not in (None, ''):
             setattr(draft, key, kwargs[key])
-    claimed = (kwargs.get('creator_email') or '').strip()
+    claimed = str(kwargs.get('creator_email') or '').strip()
     if claimed:
         if actor and claimed != actor:
             raise ToolError(
@@ -455,11 +455,11 @@ def tool_request_verification_code(actor, **kwargs):
     happens when the user pastes it back and the backend consumes it.
     """
     del actor
-    email = normalize_email((kwargs.get('email') or '').strip())
+    email = normalize_email(str(kwargs.get('email') or '').strip())
     if '@' not in email or '.' not in email or ' ' in email:
         raise ToolError("I need a valid email address to send the code to.")
     conversation = kwargs.get('_conversation')
-    escrow_reference = (kwargs.get('escrow_reference') or '').strip()
+    escrow_reference = str(kwargs.get('escrow_reference') or '').strip()
     if (conversation is not None and conversation.owner_email
             and conversation.owner_email == email):
         return {'ok': True, 'data': {
@@ -505,7 +505,7 @@ def tool_request_verification_code(actor, **kwargs):
 
 def tool_request_counterparty_join(actor, **kwargs):
     actor = _require_actor(actor)
-    code = (kwargs.get('escrow_reference') or '').strip()
+    code = str(kwargs.get('escrow_reference') or '').strip()
     contract, error = complete_counterparty_join(code, actor)
     if contract is None:
         raise ToolError(error)
@@ -552,8 +552,9 @@ def tool_request_seller_bank_details(actor, **kwargs):
             'account_name': existing.account_name,
             'note': 'Payout account already saved; contact support to change it.',
         }}
-    bank_code = (kwargs.get('bank_code') or '').strip()
-    account_number = (kwargs.get('account_number') or '').strip()
+    # The model sometimes emits these as JSON numbers, not strings.
+    bank_code = str(kwargs.get('bank_code') or '').strip()
+    account_number = str(kwargs.get('account_number') or '').strip()
     banks = list_banks()
     if bank_code not in banks:
         raise ToolError(
@@ -596,7 +597,7 @@ def tool_request_dispute_submission(actor, **kwargs):
         raise ToolError(
             f"A dispute cannot be raised from status {contract.status}."
         )
-    reason = (kwargs.get('reason') or '').strip()
+    reason = str(kwargs.get('reason') or '').strip()
     contract.transition_to('disputed')
     audit('dispute.submitted', actor=actor, escrow=contract,
           metadata={'reason': reason[:500]})
